@@ -7,7 +7,7 @@ The **Model Context Protocol (MCP)** server exposes **tools** the LLM can call d
 - **In-app:** `tradr/src/mcp/server.ts`
 - **Standalone package:** `tradr-mcp/src/server.ts`
 
-Both register the same logical tool set and connect to the configured LLM client (DeepSeek) from the orchestrator.
+Both register the same logical tool set and connect to the locally-loaded Hugging Face model owned by the orchestrator.
 
 ## Tool registry
 
@@ -24,7 +24,7 @@ This keeps adding a new tool a **single-registry** change plus one file.
 
 | File | Responsibility |
 |------|----------------|
-| `web_search.ts` | Brave Search API — general intel. |
+| `web_search.ts` | Brave Search API — general intel (disabled if `BRAVE_API_KEY` unset). |
 | `market.ts` | OHLCV + technical indicators (via broker or market data API). |
 | `news.ts` | Headlines / articles (Alpaca News, NewsAPI, etc.). |
 | `portfolio.ts` | Positions, balances, order history reads (via broker adapter). |

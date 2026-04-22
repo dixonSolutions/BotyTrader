@@ -1,6 +1,6 @@
 # BotyTrader — Documentation
 
-**BotyTrader** is a terminal-based trading assistant that combines a **TUI** (Ink), an **orchestrator** (watchlist, schedules, routing), an **agent loop** (DeepSeek LLM + MCP tools), **broker adapters** (Alpaca paper/live, Coinbase, Binance), and a **memory system** (Gemini Embedding API + Hugging Face Storage Buckets).
+**BotyTrader** is a terminal-based trading assistant that combines a **TUI** (Ink), an **orchestrator** (watchlist, schedules, routing), a **local Hugging Face ReAct agent** (`@huggingface/transformers` + MCP tools), **broker adapters** (Alpaca paper/live, Coinbase, Binance), and an optional **memory system** (Gemini Embedding API + Hugging Face Storage Buckets).
 
 This documentation describes the intended architecture and configuration. Implementation may evolve; treat these pages as the source of truth for design decisions.
 
@@ -16,6 +16,7 @@ This documentation describes the intended architecture and configuration. Implem
 | [TUI](tui.md) | Ink screens, navigation, state and commands |
 | [Configuration](configuration.md) | `config.toml`, `.env` / secrets schema, safe vs secret |
 | [Development](development.md) | Setup, run commands, conventions |
+| [Publishing](publishing.md) | APT repo, .deb packaging, npm, GitHub Actions release pipeline |
 
 ## Tech stack
 
@@ -23,12 +24,12 @@ This documentation describes the intended architecture and configuration. Implem
 |-------|------------|
 | Language | TypeScript |
 | TUI | Ink (React for CLI) |
-| LLM | DeepSeek (API) |
+| LLM | Local Hugging Face model (`@huggingface/transformers`) |
 | Agent protocol | MCP (Model Context Protocol) |
 | Embeddings (API) | Gemini Embedding API (e.g. `text-embedding-004`) |
 | Vector store | Hugging Face Storage Buckets |
 | Market data & execution | Broker adapters (Alpaca, Coinbase, Binance) |
-| Web search (tools) | Brave Search API |
+| Web search (tools) | Brave Search API (optional `BRAVE_API_KEY`) |
 | News (tools) | Alpaca News / NewsAPI (as implemented) |
 
 ## Naming

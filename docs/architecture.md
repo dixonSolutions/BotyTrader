@@ -21,7 +21,7 @@ High-level design for **BotyTrader**: TUI → Orchestrator → Agent Loop + Exec
 │  Executor   │     │           Agent Loop                    │
 │  Broker     │     │  1. recall memory                       │
 │  (Alpaca /  │     │  2. build context + system prompt       │
-│   etc.)     │     │  3. DeepSeek LLM with tools             │
+│   etc.)     │     │  3. Local HF model in a ReAct loop      │
 │  submit     │     │  4. tool calls until confident          │
 │  orders     │     │  5. emit structured decision            │
 └─────────────┘     │  6. store memory → push to HF           │
@@ -48,7 +48,7 @@ High-level design for **BotyTrader**: TUI → Orchestrator → Agent Loop + Exec
 | Role | Purpose | Choice |
 |------|---------|--------|
 | **Embedding model** | Turn text into vectors for storage and retrieval | Gemini Embedding API — e.g. `text-embedding-004` (requires `GEMINI_API_KEY`) |
-| **LLM** | Reason over retrieved context + tool results | DeepSeek API (requires `DEEPSEEK_API_KEY`) |
+| **LLM** | Reason over retrieved context + tool results | Local Hugging Face model via `@huggingface/transformers` (no API key) |
 
 ## Component responsibilities
 
@@ -82,7 +82,7 @@ flowchart LR
     post[Post actions]
   end
   subgraph agent [Agent Loop]
-    llm[DeepSeek LLM]
+    llm[Local HF Model]
   end
   subgraph mcp [MCP Tools]
     tools[market news web portfolio]

@@ -7,15 +7,19 @@ How to set up and work on **BotyTrader** once the repository contains applicatio
 - **Node.js** — LTS recommended (check repo `engines` when added).
 - **Package manager** — `pnpm`, `npm`, or `yarn` (project preference TBD in root `package.json`).
 - **Git**
-- Accounts / keys as needed: DeepSeek, Google (Gemini API), Hugging Face, Alpaca (paper), Brave Search.
+- Accounts / keys as needed: Alpaca (paper) for the broker; Google (Gemini API) + Hugging Face token are only required when `features.memory_enabled = true`; Brave Search is optional (web search tool only). The reasoning LLM runs entirely locally — no API key needed.
 
 ## First-time setup
 
 1. Clone the repository.
-2. Copy **`.env.example`** → **`.env`** and fill secrets (see [Configuration](configuration.md)).
-3. Copy or create **`config.toml`** from the example in [Configuration](configuration.md).
-4. Install dependencies: e.g. `pnpm install` or `npm install`.
-5. Verify HF Storage Bucket access: the bucket named in `config.toml → [huggingface] bucket_name` must exist (create via the Hugging Face dashboard) and `HF_TOKEN` in `.env` must have write permission.
+2. Copy or create **`config.toml`** from the example in [Configuration](configuration.md).
+3. Install dependencies: e.g. `pnpm install` or `npm install`.
+4. Run the app (`pnpm dev` / `npm run dev`).
+   - If **`.env`** is missing or any required key is absent, the TUI **Setup wizard** opens automatically and guides you through entering each credential.
+   - Alternatively, copy **`.env.example`** → **`.env`** and fill values manually before running (see [Configuration](configuration.md) for the full secrets reference).
+5. Verify HF Storage Bucket access: the bucket named in `config.toml → [huggingface] bucket_name` must exist (create via the Hugging Face dashboard) and `HF_TOKEN` must have write permission.
+
+> **Tip:** If a credential stops working after setup, press `s` inside the TUI to open the **Secrets** screen and reset it without restarting.
 
 ## Running (intended)
 

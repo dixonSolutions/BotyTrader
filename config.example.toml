@@ -1,0 +1,63 @@
+# BotyTrader — non-secret behaviour settings
+# Copy to config.toml at the project root. Safe to commit.
+
+[gemini]
+# Gemini model used for embeddings (Gemini Embedding API)
+embedding_model = "text-embedding-004"
+
+[model]
+# Active local Hugging Face model id (e.g. "TigerTrading/TradingBot",
+# "onnx-community/Qwen2.5-0.5B-Instruct"). Empty = no model selected; install
+# one from the Models screen (press `m` on the Home screen).
+id = ""
+# Quantisation hint forwarded to @huggingface/transformers.
+# One of: auto | fp32 | fp16 | q8 | q4 | q4f16
+dtype = "q4"
+# Inference device. One of: auto | cpu | wasm | webgpu
+device = "auto"
+# Hard cap on completion tokens per ReAct turn.
+max_new_tokens = 512
+# Where pulled model files live (relative paths resolve under project root).
+cache_dir = ".cache/models"
+
+[huggingface]
+# HF Storage Bucket for the long-term memory vector index.
+bucket_name = "your-username/botytrader-memory"
+endpoint = "https://huggingface.co"
+region = "us-east-1"
+
+[broker]
+# One of: alpaca_paper | alpaca_live | coinbase | binance
+platform = "alpaca_paper"
+
+[schedule]
+# Seconds between agent cycles
+agent_interval_seconds = 300
+# Seconds between exit-monitor sweeps (stop-loss / take-profit)
+exit_monitor_interval_seconds = 30
+
+[risk]
+max_position_pct = 10.0
+min_confidence_to_trade = 0.6
+stop_loss_pct = 2.0
+take_profit_pct = 5.0
+
+[watchlist]
+symbols = ["SPY", "QQQ"]
+
+[autotrade]
+# When false, orchestrator logs decisions but does not submit orders.
+enabled = false
+
+[features]
+# Long-term memory (Gemini embeddings + HF bucket). Keys stay in .env when off; app skips RAG/writes.
+memory_enabled = true
+# Expose brave_web_search to the model when true and BRAVE_API_KEY is set.
+web_search_enabled = false
+
+[agent]
+# Hard cap on ReAct iterations per cycle.
+max_iterations = 8
+# Optional. Customise the reasoning system prompt (must keep the Final JSON
+# decision contract intact, otherwise the orchestrator falls back to "hold").
+# system_prompt = """..."""

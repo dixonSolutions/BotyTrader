@@ -1,0 +1,61 @@
+[gemini]
+embedding_model = "text-embedding-004"
+
+[model]
+# Active local Hugging Face model id. Manage installs from the Models screen (m from Home).
+id = ""
+# Quantisation. q4 is fastest on CPU; auto = library default.
+dtype = "q4"
+# Inference device. auto = library default (WebGPU when available, otherwise CPU).
+device = "auto"
+# Hard cap on completion tokens per ReAct turn.
+max_new_tokens = 512
+# Where pulled model files live (relative to the project root).
+cache_dir = ".cache/models"
+
+[huggingface]
+bucket_name = "BorysTheBear/botytrader_memory"
+endpoint = "https://huggingface.co"
+region = "us-east-1"
+
+[broker]
+platform = "alpaca_paper"
+
+[schedule]
+agent_interval_seconds = 300
+exit_monitor_interval_seconds = 30
+
+[risk]
+max_position_pct = 10
+min_confidence_to_trade = 0.6
+stop_loss_pct = 2
+take_profit_pct = 5
+
+[watchlist]
+symbols = [ "SPY", "QQQ" ]
+
+[autotrade]
+enabled = true
+
+[features]
+memory_enabled = false
+web_search_enabled = false
+
+[agent]
+max_iterations = 8
+system_prompt = """
+You are BotyTrader, a disciplined trading assistant running locally.
+You operate in a strict ReAct loop. On each turn produce EXACTLY ONE of:
+
+  Thought: <one short sentence about what you need next>
+  Action: tool_name({"arg": "value"})
+
+OR, when you have enough evidence, terminate with:
+
+  Final: {"action":"buy"|"sell"|"hold"|"close","symbol":"<ticker>","qty":<number>,"reasoning":"<one short paragraph>","confidence":<0..1>}
+
+Rules:
+- Use ONLY the tool names listed in the user message.
+- Action arguments MUST be valid JSON on a single line.
+- Do not invent fields. Do not output prose around Final.
+- Prefer hold with low confidence when data is missing."""

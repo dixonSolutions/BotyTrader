@@ -11,11 +11,11 @@ Describes one **orchestrated agent cycle**: RAG injection, MCP-backed reasoning,
 
 ### During reasoning — MCP tools
 
-The LLM may call MCP tools freely until it is ready to emit a final decision. Typical tools:
+The local model emits `Thought` / `Action` lines in a ReAct loop until it is ready to emit a `Final` decision. Typical tools:
 
 | Tool name (conceptual) | Purpose |
 |------------------------|---------|
-| `brave_web_search` | General web search (Brave Search API). |
+| `brave_web_search` | General web search (Brave Search API; requires `BRAVE_API_KEY`). |
 | `get_price_history` | OHLCV for a symbol over N days. |
 | `get_technical_indicators` | Derived indicators (e.g. SMA, RSI) for a symbol. |
 | `search_news` | News headlines / articles for a symbol (Alpaca News, NewsAPI, etc.). |
@@ -26,7 +26,7 @@ Implementation names may differ (e.g. snake_case in MCP schema); keep contracts 
 
 ### Decision point — structured output (not a tool)
 
-The agent emits a **single structured JSON object** as the cycle outcome — **not** as an MCP tool call. The orchestrator parses and validates this before any execution.
+The agent emits a **single structured JSON object** prefixed with `Final:` as the cycle outcome — **not** as an MCP tool call. The orchestrator parses and validates this before any execution.
 
 **Suggested schema:**
 
@@ -63,8 +63,8 @@ The agent **must not** directly submit orders or push to Hugging Face as unrestr
 
 1. **Pull memory from HF** — Startup only (or on interval): sync local LanceDB / dataset with remote repo if configured.
 2. **RAG:** Embed current context → retrieve top-5 (or k) memories → build system prompt with injected memories.
-3. **Open MCP session** with DeepSeek (or configured LLM) and registered tools.
-4. **Agent reasoning loop:** LLM → tool_call → MCP server → result → LLM, until the model returns a **final decision JSON**.
+3. **Build the local ReAct prompt** with the active Hugging Face model (`@huggingface/transformers`) and the registered MCP tool catalogue.
+4. **ReAct reasoning loop:** model emits `Thought` / `Action: tool(args)`, the orchestrator dispatches the tool in-process, feeds the result back as the next `Observation`, and repeats until the model emits `Final: { ... }`.
 5. **Parse decision** — Validate schema and policy.
 6. **If autoTrade:** `broker.submitOrder(...)` via adapter.
 7. **Memory:** `memory.summarizeAndStore(cycleData)` (embed + LanceDB + optional HF push).

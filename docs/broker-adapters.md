@@ -16,7 +16,7 @@ Exact method names and types are defined in code; documentation here describes r
 
 | Adapter | File | Typical use |
 |---------|------|-------------|
-| Alpaca | `adapters/alpaca.ts` | Paper and live US equities (keys in `.env`). |
+| Alpaca | `adapters/alpaca.ts` | Paper and live US equities (keys in `.env`). Market data uses Alpaca’s **`feed=iex`** path so free/paper accounts are not charged for SIP-only bars/quotes. |
 | Coinbase | `adapters/coinbase.ts` | Spot crypto (if implemented). |
 | Binance | `adapters/binance.ts` | Spot/futures per scope (if implemented). |
 

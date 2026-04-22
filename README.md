@@ -1,10 +1,64 @@
 # BotyTrader
 
-**BotyTrader** is a terminal-based trading assistant: an **Ink** TUI, an **orchestrator** (watchlist, schedules, routing), an **agent loop** (DeepSeek LLM + MCP tools), **broker adapters** (Alpaca paper/live, Coinbase, Binance), and a **memory** stack (Gemini Embedding API + Hugging Face Storage Buckets).
+**BotyTrader** is a terminal-based AI trading assistant. It combines an **Ink** TUI, a TypeScript **orchestrator** (watchlist + schedules + risk gates), a **local Hugging Face ReAct agent** (`@huggingface/transformers` + MCP tools — no remote LLM API key required), broker-agnostic **adapters** (Alpaca paper/live, Coinbase, Binance scaffolds), and an optional **memory** stack (Gemini Embedding API → Hugging Face Storage Bucket).
+
+## Quick start
+
+```bash
+# 1. Install dependencies
+npm install
+
+# 2. Copy non-secret config (safe to commit later if you customise)
+cp config.example.toml config.toml
+
+# 3. Run — the TUI Setup wizard opens automatically if any required .env key is missing
+npm run dev
+```
+
+You do **not** need to copy `.env.example` manually; the wizard will collect each missing credential and write `.env` (mode 0600) for you.
+
+## Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `npm run dev` | Launch Ink TUI + orchestrator (no watcher — recommended for using the TUI). |
+| `npm run dev:watch` | Same as `dev` but restarts on source changes. **Avoid if you want to use the TUI** — `tsx watch` and Ink both read stdin and arrow keys can collide with the watcher. |
+| `npm run start` | Run the built bundle from `dist/`. |
+| `npm run build` | Bundle TypeScript with `tsup` (ESM + CJS). |
+| `npm run compile` | Compile to a single Linux x64 binary with `@yao-pkg/pkg`. |
+| `npm run typecheck` | `tsc --noEmit`. |
+| `npm run lint` | ESLint over `src/`. |
+| `npm run mcp` | Run the standalone MCP server over stdio. |
+
+## Project layout
+
+```
+src/
+├── agent/loop.ts              ← RAG → ReAct (local HF model) → tool loop → decision JSON
+├── llm/local_model.ts         ← @huggingface/transformers wrapper (one pipeline / process)
+├── llm/model_manager.ts       ← list / pull / select / delete local models
+├── actions/                   ← Orchestrator-only side effects (orders, memory)
+├── execution/
+│   ├── broker.ts              ← BrokerAdapter interface
+│   ├── exit_monitor.ts        ← Deterministic stop-loss / take-profit
+│   └── adapters/{alpaca,coinbase,binance}.ts
+├── mcp/
+│   ├── server.ts              ← Standalone MCP entry + in-process dispatcher
+│   └── tools/                 ← market, news, web_search, portfolio
+├── memory/
+│   ├── embedder.ts            ← Gemini Embedding API
+│   ├── store.ts               ← Vector index + cosine search
+│   └── hf.ts                  ← Hugging Face Storage Bucket (S3-compatible)
+├── signal/technical.ts        ← SMA, RSI
+├── tui/                       ← Ink app, screens, layout primitives
+├── config.ts                  ← Zod-validated config + secrets loader
+├── orchestrator.ts            ← State owner + cycle scheduler + risk gates
+└── index.ts                   ← Startup sequence
+```
 
 ## Documentation
 
-Full architecture, agent cycle, MCP tools, memory, brokers, TUI, and configuration are documented here:
+Full architecture, agent cycle, MCP tools, memory, brokers, TUI, configuration, and packaging:
 
 **[docs/index.md](docs/index.md)**
 
@@ -12,16 +66,20 @@ Full architecture, agent cycle, MCP tools, memory, brokers, TUI, and configurati
 |-----|-------------|
 | [docs/architecture.md](docs/architecture.md) | System diagram, components, source layout |
 | [docs/agent-cycle.md](docs/agent-cycle.md) | RAG, reasoning, decision JSON, post-decision actions |
-| [docs/memory.md](docs/memory.md) | Embedder, LanceDB, Hugging Face sync |
+| [docs/memory.md](docs/memory.md) | Embedder, store, Hugging Face sync |
 | [docs/mcp-server.md](docs/mcp-server.md) | MCP tools vs orchestrator actions |
 | [docs/broker-adapters.md](docs/broker-adapters.md) | BrokerAdapter, adapters, exit monitor |
 | [docs/tui.md](docs/tui.md) | Ink screens and state flow |
 | [docs/configuration.md](docs/configuration.md) | `config.toml`, `.env`, secrets schema |
 | [docs/development.md](docs/development.md) | Setup and conventions |
+| [docs/publishing.md](docs/publishing.md) | APT repo, `.deb` packaging, npm, release pipeline |
 
-## Status
+## Security
 
-Application source (`package.json`, `src/`) is not yet in this tree; the **docs** folder describes the intended design for implementation.
+- **Order submission** and **memory writes** are **orchestrator actions**, never agent-callable tools — risk gates and the autotrade flag cannot be bypassed by the LLM.
+- Broker-specific secrets are escalated to required at runtime based on `broker.platform`.
+- `.env` is created with mode `0600` and never committed.
+- Hard exits (stop-loss / take-profit) run in a deterministic loop independent of the LLM.
 
 ---
 

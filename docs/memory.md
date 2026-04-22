@@ -2,6 +2,8 @@
 
 The memory subsystem supports **RAG** (retrieval-augmented generation): embed text via the **Gemini Embedding API**, store and retrieve vectors in a **Hugging Face Storage Bucket** (S3-compatible object storage), and inject retrieved passages into the agent's system prompt each cycle.
 
+When `features.memory_enabled` is `false` in `config.toml`, the app skips RAG, sync, and writes (API keys may remain in `.env`). Restart after turning memory back on if you booted with it off so a real `MemoryStore` is constructed.
+
 ## Layers
 
 | Module | File (intended) | Role |

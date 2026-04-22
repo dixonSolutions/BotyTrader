@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build artefacts
+dist/
+bin/
+*.tsbuildinfo
+
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local memory cache (vector index lives in HF Storage Bucket; this is a local cache only)
+.cache/
+.memory-cache/
+
+# Last orchestrator session summary (written on quit)
+.botytrader-last-session.json
+
+# Packaging output
+*.deb
+apt-repo/

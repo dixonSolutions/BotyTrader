@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build bundle
+        run: npm run build
+
+      - name: Compile binary
+        run: npm run compile
+
+      - name: Package .deb
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          gem install fpm --no-document
+          fpm \
+            --input-type dir \
+            --output-type deb \
+            --name botytrader \
+            --version "$VERSION" \
+            --architecture amd64 \
+            --description "Terminal-based AI trading assistant" \
+            --maintainer "BotyTrader Maintainers" \
+            --url "https://github.com/${GITHUB_REPOSITORY}" \
+            --prefix /usr/local/bin \
+            bin/botytrader
+          echo "DEB=botytrader_${VERSION}_amd64.deb" >> "$GITHUB_ENV"
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.DEB }}
+
+      - name: Update APT repo (gh-pages)
+        if: ${{ env.PUBLISH_APT == 'true' }}
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          PUBLISH_APT: ${{ vars.PUBLISH_APT }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y reprepro gnupg
+          echo "$GPG_PRIVATE_KEY" | gpg --import
+          git config user.email "ci@github.com"
+          git config user.name "GitHub Actions"
+          git fetch origin gh-pages
+          git checkout gh-pages
+          reprepro -b . includedeb stable "$DEB"
+          git add .
+          git commit -m "APT: add $DEB"
+          git push origin gh-pages
