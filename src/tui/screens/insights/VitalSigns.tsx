@@ -1,10 +1,10 @@
 /**
- * Vital signs strip — the always-visible top bar for the Insights screen.
- * One row, color-coded, so the user can scan health in <400ms (Doherty).
+ * Vital signs strip — health at a glance (Doherty threshold).
+ * On narrow terminals, metrics stack instead of squeezing one row.
  */
 
 import React from "react";
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 
 import { Sparkline } from "../../components/Sparkline.js";
 import { theme } from "../../theme.js";
@@ -15,12 +15,55 @@ interface Props {
 }
 
 export function VitalSigns({ state }: Props): React.ReactElement {
+  const { stdout } = useStdout();
+  const cols = stdout.columns ?? 80;
+  const narrow = cols < 76;
   const equity = state.account?.equity ?? null;
   const currency = state.account?.currency ?? "USD";
   const pnlAbs = state.performance.dailyPnlAbs;
   const pnlPct = state.performance.dailyPnlPct;
   const pnlColor =
     pnlAbs === null ? theme.color.muted : pnlAbs >= 0 ? theme.color.success : theme.color.danger;
+
+  const metaRow = (
+    <>
+      <Box flexDirection={narrow ? "column" : "row"} flexWrap="wrap" marginBottom={narrow ? 1 : 0}>
+        <Box marginRight={narrow ? 0 : 2} marginBottom={narrow ? 0 : 0}>
+          <Text color={theme.color.muted}>Status </Text>
+          <Text bold color={statusColor(state.status)}>
+            {state.status.toUpperCase()}
+          </Text>
+        </Box>
+        <Box marginRight={narrow ? 0 : 2}>
+          <Text color={theme.color.muted}>Equity </Text>
+          <Text bold>{fmtMoney(equity, currency)}</Text>
+        </Box>
+        <Box marginRight={narrow ? 0 : 2}>
+          <Text color={theme.color.muted}>24h PnL </Text>
+          <Text bold color={pnlColor}>
+            {fmtSignedMoney(pnlAbs, currency)}
+            {pnlPct !== null ? ` (${fmtSignedPct(pnlPct)})` : ""}
+          </Text>
+        </Box>
+        <Box marginRight={narrow ? 0 : 2}>
+          <Text color={theme.color.muted}>Uptime </Text>
+          <Text>{fmtUptime(state.startedAt)}</Text>
+        </Box>
+        <Box>
+          <Text color={theme.color.muted}>Latency </Text>
+          <Text color={latencyColor(state.pingMs)}>{state.pingMs === null ? "—" : `${state.pingMs}ms`}</Text>
+        </Box>
+      </Box>
+      <Box flexDirection="row" flexWrap="wrap" alignItems="center">
+        <Text color={theme.color.muted}>Equity trail </Text>
+        <Sparkline
+          values={state.equityHistory.map((s) => s.equity)}
+          width={Math.min(48, Math.max(12, cols - 18))}
+          color={theme.color.primary}
+        />
+      </Box>
+    </>
+  );
 
   return (
     <Box
@@ -30,39 +73,7 @@ export function VitalSigns({ state }: Props): React.ReactElement {
       paddingX={1}
       marginBottom={1}
     >
-      <Box justifyContent="space-between">
-        <Box>
-          <Text color={theme.color.muted}>Status </Text>
-          <Text bold color={statusColor(state.status)}>
-            {state.status.toUpperCase()}
-          </Text>
-        </Box>
-        <Box>
-          <Text color={theme.color.muted}>Equity </Text>
-          <Text bold>{fmtMoney(equity, currency)}</Text>
-        </Box>
-        <Box>
-          <Text color={theme.color.muted}>24h PnL </Text>
-          <Text bold color={pnlColor}>
-            {fmtSignedMoney(pnlAbs, currency)}
-            {pnlPct !== null ? `  (${fmtSignedPct(pnlPct)})` : ""}
-          </Text>
-        </Box>
-        <Box>
-          <Text color={theme.color.muted}>Uptime </Text>
-          <Text>{fmtUptime(state.startedAt)}</Text>
-        </Box>
-        <Box>
-          <Text color={theme.color.muted}>Latency </Text>
-          <Text color={latencyColor(state.pingMs)}>
-            {state.pingMs === null ? "—" : `${state.pingMs}ms`}
-          </Text>
-        </Box>
-      </Box>
-      <Box marginTop={1}>
-        <Text color={theme.color.muted}>Equity </Text>
-        <Sparkline values={state.equityHistory.map((s) => s.equity)} width={48} color={theme.color.primary} />
-      </Box>
+      {metaRow}
     </Box>
   );
 }

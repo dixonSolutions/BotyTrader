@@ -1,24 +1,17 @@
 /**
- * Secrets editor — view (masked) and reset .env credentials.
- * Required keys are highlighted; broker-specific requirements come from
- * `brokerRequiredSecrets(config.broker.platform)`.
- *
- * `/` opens global search (all tabs). `f` toggles in-tab filter.
+ * Secrets editor — view (masked) and reset .env credentials. Pointer + text entry for values.
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Box, Text, useInput } from "ink";
-import TextInput from "ink-text-input";
+import { Box, Text } from "ink";
+import TextInput from "../../components/SafeTextInput.js";
 
+import { Button } from "../../components/Button.js";
+import { ClickableRow } from "../../components/ClickableRow.js";
 import { Panel } from "../../components/Layout.js";
+import { icons } from "../../components/icons.js";
 import { theme } from "../../theme.js";
-import {
-  SECRET_DESCRIPTIONS,
-  SecretsSchema,
-  brokerRequiredSecrets,
-  writeEnv,
-  type Secrets,
-} from "../../../config.js";
+import { SECRET_DESCRIPTIONS, SecretsSchema, brokerRequiredSecrets, writeEnv, type Secrets } from "../../../config.js";
 import type { Orchestrator } from "../../../orchestrator.js";
 
 const ALL_KEYS = Object.keys(SecretsSchema.shape) as (keyof Secrets)[];
@@ -28,23 +21,17 @@ interface Props {
   active: boolean;
   focusRowId?: string | null;
   onFocusRowConsumed?: () => void;
-  onOpenGlobalSearch?: () => void;
 }
 
-export function SecretsEditor({
-  orchestrator,
-  active,
-  focusRowId,
-  onFocusRowConsumed,
-  onOpenGlobalSearch,
-}: Props): React.ReactElement {
-  const [cursor, setCursor] = useState(0);
+export function SecretsEditor({ orchestrator, active, focusRowId, onFocusRowConsumed }: Props): React.ReactElement {
+  const [selectedIdx, setSelectedIdx] = useState(0);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [filterMode, setFilterMode] = useState(false);
   const [filterQuery, setFilterQuery] = useState("");
   const consumeRef = useRef(onFocusRowConsumed);
   consumeRef.current = onFocusRowConsumed;
+  void active;
 
   const required = useMemo(() => {
     const base: (keyof Secrets)[] = [...brokerRequiredSecrets(orchestrator.config.broker.platform)];
@@ -70,58 +57,23 @@ export function SecretsEditor({
     if (focusRowId == null) return;
     setFilterMode(false);
     setFilterQuery("");
-    const j = ALL_KEYS.indexOf(focusRowId as keyof Secrets);
-    if (j >= 0) setCursor(j);
-    consumeRef.current?.();
   }, [focusRowId]);
 
-  useInput(
-    (input, key) => {
-      if (editing) return;
-      if (filterMode) {
-        if (input === "f") {
-          setFilterMode(false);
-          setFilterQuery("");
-          return;
-        }
-        if (key.backspace || key.delete) {
-          setFilterQuery((q) => q.slice(0, -1));
-          setCursor(0);
-          return;
-        }
-        if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
-        else if (key.downArrow) setCursor((c) => Math.min(visibleKeys.length - 1, c + 1));
-        else if (key.return) {
-          setEditing(true);
-          setDraft("");
-        } else if (input && !key.ctrl && !key.meta && input.length === 1) {
-          setFilterQuery((q) => q + input);
-          setCursor(0);
-        }
-        return;
-      }
-      if (input === "/") {
-        onOpenGlobalSearch?.();
-        return;
-      }
-      if (input === "f") {
-        setFilterMode(true);
-        setFilterQuery("");
-        setCursor(0);
-        return;
-      }
-      if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
-      else if (key.downArrow) setCursor((c) => Math.min(visibleKeys.length - 1, c + 1));
-      else if (key.return) {
-        setEditing(true);
-        setDraft("");
-      }
-    },
-    { isActive: active },
-  );
+  useEffect(() => {
+    if (focusRowId == null) return;
+    const j = visibleKeys.indexOf(focusRowId as keyof Secrets);
+    if (j >= 0) setSelectedIdx(j);
+    consumeRef.current?.();
+  }, [focusRowId, visibleKeys]);
+
+  function openEdit(index: number): void {
+    setSelectedIdx(index);
+    setEditing(true);
+    setDraft("");
+  }
 
   function commit(): void {
-    const keyName = visibleKeys[cursor];
+    const keyName = visibleKeys[selectedIdx];
     if (!keyName) return;
     const value = draft.trim();
     if (value) writeEnv({ [keyName]: value });
@@ -131,10 +83,26 @@ export function SecretsEditor({
 
   return (
     <Panel>
+      <Box marginBottom={1} flexDirection="row" flexWrap="wrap">
+        <Button
+          label={filterMode ? "Done filtering" : "Filter keys"}
+          icon={filterMode ? icons.close : icons.search}
+          onClick={() => {
+            if (filterMode) {
+              setFilterMode(false);
+              setFilterQuery("");
+            } else {
+              setFilterMode(true);
+              setFilterQuery("");
+            }
+          }}
+          variant="secondary"
+        />
+      </Box>
       {filterMode ? (
-        <Box marginBottom={1}>
-          <Text color={theme.color.accent}>Filter: </Text>
-          <Text color={theme.color.text}>{filterQuery.length ? filterQuery : "(type to narrow)"}</Text>
+        <Box marginBottom={1} flexDirection="row" flexWrap="wrap">
+          <Text color={theme.color.accent}>Narrow: </Text>
+          <TextInput value={filterQuery} onChange={setFilterQuery} />
         </Box>
       ) : null}
       {visibleKeys.length === 0 ? (
@@ -144,36 +112,37 @@ export function SecretsEditor({
           const set = Boolean(process.env[key] && process.env[key]!.trim() !== "");
           const isRequired = required.has(key);
           return (
-            <Box key={key} flexDirection="column">
-              <Box>
-                <Text color={i === cursor ? theme.color.accent : theme.color.text}>
-                  {i === cursor ? "› " : "  "}
-                  {key}
-                </Text>
+            <ClickableRow
+              key={key}
+              selected={i === selectedIdx}
+              onClick={() => {
+                if (editing) return;
+                openEdit(i);
+              }}
+              detail={SECRET_DESCRIPTIONS[key]}
+            >
+              <Text>
+                <Text color={i === selectedIdx ? theme.color.accent : theme.color.text}>{key}</Text>
                 <Text color={theme.color.muted}>{"  "}</Text>
                 <Text color={set ? theme.color.success : isRequired ? theme.color.danger : theme.color.muted}>
                   {set ? "set" : isRequired ? "missing (required)" : "unset"}
                 </Text>
-              </Box>
-              {i === cursor ? (
-                <Text color={theme.color.muted}>{"  " + SECRET_DESCRIPTIONS[key]}</Text>
-              ) : null}
-            </Box>
+              </Text>
+            </ClickableRow>
           );
         })
       )}
       {editing ? (
-        <Box marginTop={1}>
+        <Box marginTop={1} flexDirection="row" flexWrap="wrap">
           <Text color={theme.color.primary}>New value (hidden): </Text>
           <TextInput value={draft} onChange={setDraft} onSubmit={commit} mask="*" />
+          <Box marginLeft={1}>
+            <Button label="Save" icon={icons.check} onClick={commit} minWidth={8} />
+          </Box>
         </Box>
       ) : (
         <Box marginTop={1}>
-          <Text color={theme.color.muted}>
-            {filterMode
-              ? "type filter · f exit filter · ↑/↓ · Enter set"
-              : "↑/↓ · Enter set · / search all · f filter"}
-          </Text>
+          <Text color={theme.color.muted}>Click a key to set it. Use Filter to narrow. Typing the secret uses the keyboard.</Text>
         </Box>
       )}
     </Panel>

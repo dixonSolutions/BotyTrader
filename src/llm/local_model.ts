@@ -4,11 +4,11 @@
  * Responsibilities (single):
  *   - Lazily construct ONE pipeline per process for the active model id.
  *   - Forward a chat message list through the model's tokenizer chat template.
- *   - Surface download progress to the orchestrator (used by the Models TUI).
+ *   - Surface download progress to the orchestrator (first pipeline load).
  *
  * The library is ESM-only and pulls a few MB of native ONNX runtime, so we
  * import lazily on first use to keep startup fast for users who only browse
- * Config / Models without running a cycle.
+ * Config without running a cycle.
  */
 
 import path from "node:path";
@@ -82,7 +82,7 @@ export async function getLocalPipeline(
   const id = config.model.id.trim();
   if (!id) {
     throw new Error(
-      "No local model selected. Open the Models screen (m from Home) to install and select one.",
+      "No local model selected. Set [model] id in config.toml or Config → Settings → Active local model, then ensure files are cached (e.g. pull the repo with transformers.js).",
     );
   }
   if (cached && cached.id === id) return cached.pipe;

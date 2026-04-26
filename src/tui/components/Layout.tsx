@@ -7,21 +7,30 @@
  */
 
 import React from "react";
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 
+import { Button } from "./Button.js";
 import { theme } from "../theme.js";
+import { icons } from "./icons.js";
 
 export interface HeaderProps {
   breadcrumb: string[];
   brokerName: string;
   connected: boolean;
+  /** When set, shows a primary back control (pointer). */
+  onBack?: () => void;
 }
 
-export function Header({ breadcrumb, brokerName, connected }: HeaderProps): React.ReactElement {
+export function Header({ breadcrumb, brokerName, connected, onBack }: HeaderProps): React.ReactElement {
   return (
     <Box flexDirection="column">
-      <Box paddingX={theme.padding} justifyContent="space-between">
-        <Box>
+      {onBack ? (
+        <Box paddingX={theme.padding} marginBottom={0}>
+          <Button label="Back" icon={icons.back} onClick={onBack} variant="secondary" minWidth={14} />
+        </Box>
+      ) : null}
+      <Box paddingX={theme.padding} flexDirection="row" justifyContent="space-between">
+        <Box flexDirection="row" flexWrap="wrap" flexGrow={1} minWidth={0}>
           <Text bold color={theme.color.primary}>
             BotyTrader
           </Text>
@@ -32,7 +41,7 @@ export function Header({ breadcrumb, brokerName, connected }: HeaderProps): Reac
             </>
           ) : null}
         </Box>
-        <Box>
+        <Box flexShrink={0} marginLeft={1}>
           <Text color={theme.color.muted}>broker </Text>
           <Text color={connected ? theme.color.success : theme.color.danger}>{brokerName}</Text>
           <Text color={theme.color.muted}>{connected ? " ●" : " ✗"}</Text>
@@ -59,7 +68,9 @@ export function Footer({ hints }: { hints: string[] }): React.ReactElement {
 }
 
 export function Divider(): React.ReactElement {
-  return <Text color={theme.color.muted}>{"─".repeat(80)}</Text>;
+  const { stdout } = useStdout();
+  const w = Math.max(8, stdout.columns ?? 80);
+  return <Text color={theme.color.muted}>{"─".repeat(w)}</Text>;
 }
 
 export interface ScreenFrameProps {

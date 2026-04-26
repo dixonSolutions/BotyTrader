@@ -1,98 +1,70 @@
-# TUI (Ink)
+# TUI (Ink + pointer)
 
-The **BotyTrader** terminal UI is built with **Ink** (React for terminal UIs). It displays orchestrator and agent state and sends **commands** to the orchestrator (never bypassing backend validation when a remote API exists).
+The **BotyTrader** terminal UI is built with **Ink** (React for terminal UIs) and **[@zenobius/ink-mouse](https://github.com/zenobi-us/ink-mouse)** for pointer hit-testing. The root `render()` in `src/index.tsx` wraps the app in `<MouseProvider>` so buttons, rows, and tabs respond to the terminal’s mouse protocol. Ink only enables **TTY raw mode** while some `useInput` hook is active; without that, SGR pointer bytes can **echo** visibly (e.g. on **Home**, which has no text field). A no-op `useInput` in `index.tsx` keeps stdin raw for the whole session so that noise does not appear.
 
-## Screens
+**Interaction model:** primary actions are **clickable** (filled pill buttons, tab strips, and list rows). **Typing** is still used where free-form text is required (`SafeTextInput` — same UX as ink-text-input, but ignores SGR mouse bytes that would otherwise be appended while a field is focused — search fields, secret values, model ids, etc.). A terminal with **SGR mouse reporting** (e.g. modern VS Code, iTerm, Windows Terminal, most Linux VTE) is required for clicks; SSH/tmux can work if mouse mode is forwarded, but behaviour varies by environment.
 
-| Screen | Purpose |
-|--------|---------|
-| **Setup** | First-run and credential-reset wizard. Appears automatically on startup when any required `.env` key is missing; always reachable from any screen via `s`. |
-| **Dashboard** | High-level status: connection, last cycle, PnL snapshot, alerts. |
-| **Watchlist** | Symbols under management; edit list (persisted via `config.toml`). |
-| **Agent Log** | Stream of agent reasoning steps, tool calls, and errors (truncated/pretty-printed). |
-| **Memory** | Recent retrievals, stored summaries, sync status with Hugging Face. |
-| **Config** | View/edit non-secret preferences (embedding model id, risk thresholds, broker platform, schedule). Use `/` to search across Settings, Secrets, and Schedule; use `f` to filter rows on the active sub-tab. |
-| **Secrets** | View which `.env` keys are set (values masked). Reset or re-enter any credential without leaving the TUI. |
+**Hit-testing:** Bounds are **derived from the same yoga getters Ink uses when painting** (`getComputedLeft` / `getComputedTop` / `getComputedWidth` / `getComputedHeight`, summed from `ink-root` down to the element — same idea as `ink/build/render-node-to-output.js`). `usePointerTarget` recomputes that box on every pointer move/press, passes the live **`stdout.columns` / `stdout.rows`** viewport into hit tests (clamp SGR cells to the terminal grid), and rebinds when the terminal resizes. SGR `Px`/`Py` are shifted by an **origin** (default **1,1** for xterm 1-based cells); set **`BOTYTRADER_POINTER_ORIGIN=0`** or **`dx,dy`** if your terminal differs.
 
-Optional **Portfolio** screen may mirror broker positions (`Portfolio.tsx` in the intended tree).
+**Alternate screen:** On a normal shell, Ink’s first row can start **below the prompt** while the mouse still reports **viewport** coordinates from the top — hits look permanently wrong. `AlternateScreen` (`\x1b[?1049h`) switches to the alternate buffer so the TUI starts at the terminal origin. Disable with **`BOTYTRADER_NO_ALT_SCREEN=1`** if your environment breaks on alt-screen (some embedded terminals).
+
+The TUI **displays** orchestrator and agent state and sends **intents** to the orchestrator (orders, config writes, model operations), which keeps validation and permissions on the backend. This matches “security at the API level” — the TUI is not a second authority.
+
+## Screens (current `src/tui/`)
+
+| Area | Purpose |
+|------|--------|
+| **Home** | Choose **Insights** or **Config**; **Quit** exits the app. |
+| **Setup** | First-run / missing `.env` keys — masked `TextInput` for each key. |
+| **Insights** | Dashboard: vitals, agent activity, performance, positions, market context, system logs. Toolbar buttons for run/pause/ping, focus symbol, log viewport. |
+| **Config** | Sub-tabs: **Settings**, **Trading**, **Models** (FinBERT [ProsusAI/finbert](https://huggingface.co/ProsusAI/finbert) only — provider, warm, agent blend ±), **Secrets**, **Schedule**. **Search all tabs** opens a global search panel; each sub-tab can **Filter** rows where shown. |
 
 ## Navigation
 
-- Tab or key-based switching between `[Dashboard] [Watchlist] [Agent Log] [Memory] [Config] [Secrets]`.
-- Press `s` from any screen to open the **Secrets** screen and reset credentials at any time.
-- Keep **choice overload** low: primary actions visible per screen; advanced options behind a single "Advanced" or config file.
+- **Header** — On every screen except **Home**, **Back** is its **own row** under the chrome (secondary pill + icon) so it stays visible on dense dashboards; the next row is **BotyTrader** + breadcrumb and broker status. **Back** returns to **Home** from Insights / Config; on **Setup**, it goes to the previous secret step or exits on the first step (and matches **Continue** when there is nothing to configure). The divider uses live **`stdout.columns`**.
+- **Tabs** — click the pill for each Config sub-tab (Settings, Trading, Models, …).
+- **Home** — click a large card to open a route, or **Quit** to exit.
 
-### Setup wizard (automatic on missing secrets)
-
-On startup, `SecretsSchema` validates every required `.env` key. If any key is absent or empty the app **does not crash** — it opens the **Setup** screen instead. The wizard:
-
-1. Lists each missing key with a short description of what it is and where to obtain it.
-2. Shows a masked input field for each key.
-3. Writes accepted values to `.env` (creating the file if it does not exist).
-4. Re-validates and launches normally once all required keys pass.
-
-This means you can skip the manual `.env` copy step entirely — just run the app and let the TUI guide you.
-
-### Resetting credentials
-
-If an API key stops working (rotated, expired, or entered incorrectly) open the **Secrets** screen (`s` from any screen):
-
-1. Navigate to the key you want to change.
-2. Press `Enter` to edit — the current value is cleared and a masked input appears.
-3. Type the new value and confirm with `Enter`.
-4. The orchestrator reloads secrets in place without a full restart.
-
-You never need to manually edit `.env` to fix a broken credential.
+No global keyboard shortcuts are documented for these flows; use the on-screen controls. Text fields continue to support normal keyboard entry and **Enter** to submit where `onSubmit` is wired on the text field.
 
 ## State flow
 
 ```
 ┌──────────┐     subscribe / poll      ┌───────────────┐
 │   TUI    │ ◄─────────────────────── │ Orchestrator  │
-│ app.tsx  │ ── commands (keyboard) ─►│ (state owner) │
+│ app.tsx  │ ◄─ intents (clicks) ─────►│ (state owner)  │
 └──────────┘                           └───────────────┘
 ```
 
-- **TUI renders** snapshots from orchestrator state (and optional log buffer).
-- **TUI sends** intents: e.g. "reload config", "pause cycles", "run watchlist symbol now", "reload secrets" — the orchestrator enforces permissions and schedules.
-
-## Files (intended)
+## Files (approximate)
 
 ```
 src/tui/
-├── app.tsx              ← root Ink app, routing between screens
+├── app.tsx                 ← root routing (Home, Insights, Config)
+├── theme.ts
+├── components/
+│   ├── Layout.tsx          ← Header (Back), Footer, ScreenFrame, Panel
+│   ├── Button.tsx
+│   ├── IconButton.tsx
+│   ├── TabBarClickable.tsx
+│   ├── ClickableRow.tsx
+│   └── icons.ts
 └── screens/
-    ├── Setup.tsx        ← startup wizard and credential reset
-    ├── Dashboard.tsx
-    ├── Watchlist.tsx
-    ├── AgentLog.tsx
-    ├── Memory.tsx
-    ├── Portfolio.tsx
-    ├── Config.tsx
-    └── Secrets.tsx      ← masked view + edit for .env keys
+    ├── Home.tsx
+    ├── Setup.tsx
+    ├── config/             ← Config, FinbertModelsEditor (Models tab), editors, …
+    └── insights/            ← Insights, VitalSigns, SystemLogs, …
 ```
 
 ## UX principles (project)
 
-- **Consistency:** Same keybindings and labels across screens.
+- **Consistency:** Shared `Button` / `TabBarClickable` / `ClickableRow` and `theme` tokens.
 - **Hierarchy:** One clear title per screen; secondary info in panels.
-- **Whitespace:** Avoid dense walls of text; chunk logs in Agent Log.
-- **Feedback:** Under 400ms response where possible for local actions (Doherty threshold); show loading for network.
-
-## Insights → Agent session panel
-
-The **Insights** screen includes an **Agent session** strip (below vitals) that shows:
-
-- **Previous run** — summary from the last time you quit the app (`q`), written to `.botytrader-last-session.json` (gitignored).
-- **Next automatic cycle** — countdown from the scheduler (`config.toml` interval); shows paused / empty-watchlist states.
-- **Right now** — live phase while a cycle runs (RAG, tool calls, decision).
-- **Latest reasoning** — full reasoning string from the most recently completed cycle.
-
-Manual run: from Insights, press **`n`** to run the agent immediately for the **focus symbol** (change symbol with **Tab** / **Shift+Tab**).
-
-**System logs** show a **virtual viewport** (newest at top). Use **`[`** / **`]`** to scroll one line older/newer, **PgUp** / **PgDn** for a page, **`0`** to jump back to the newest tail.
+- **Chunking:** Toolbars grouped by function (agent vs logs) on Insights.
+- **Feedback:** Show busy states where the orchestrator runs async work.
 
 ## Related docs
 
 - [Architecture](architecture.md) — TUI in the system diagram.
-- [Configuration](configuration.md) — `.env` secrets, setup wizard flow, and `SecretsSchema`.
+- [Configuration](configuration.md) — `.env` secrets, setup wizard, `SecretsSchema`.
+- [Models & inference](models.md) — reasoning `[model]` vs FinBERT `[sentiment]` (Config → Models tab).

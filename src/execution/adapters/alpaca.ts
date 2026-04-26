@@ -10,6 +10,7 @@ import type {
   AccountSummary,
   BrokerAdapter,
   NewsItem,
+  NewsSearchOpts,
   Order,
   OrderBookSnapshot,
   OrderRequest,
@@ -148,16 +149,83 @@ export class AlpacaAdapter implements BrokerAdapter {
   }
 
   async getNews(symbol: string, limit: number): Promise<NewsItem[]> {
-    const params = new URLSearchParams({ symbols: symbol, limit: String(limit) });
+    const cap = Math.min(Math.max(1, limit), 50);
+    const params = new URLSearchParams({ symbols: symbol, limit: String(cap) });
+    const { items } = await this.fetchNewsPage(params);
+    return items;
+  }
+
+  /**
+   * News by ticker(s) or keywords. Pages at 50/request until Alpaca returns no
+   * `next_page_token`. Keyword mode fetches the full unfiltered timeline then
+   * filters client-side (Alpaca has no full-text query param).
+   */
+  async searchNews(query: string, opts?: NewsSearchOpts): Promise<NewsItem[]> {
+    const q = query.trim();
+    if (!q) return [];
+    const symbolCsv = parseSymbolCsvFromQuery(q);
+    const base = new URLSearchParams({ sort: "desc" });
+    if (symbolCsv) {
+      base.set("symbols", symbolCsv);
+    }
+    const all = await this.fetchAllNewsPages(base);
+    let out: NewsItem[];
+    if (symbolCsv) {
+      out = all;
+    } else {
+      const tokens = normalizeSearchTokens(q);
+      if (tokens.length === 0) return [];
+      out = all.filter((it) => articleMatchesTokens(it, tokens));
+    }
+    const cap = opts?.maxArticles;
+    if (cap !== undefined && cap > 0 && out.length > cap) {
+      return out.slice(0, cap);
+    }
+    return out;
+  }
+
+  /** One GET; Alpaca returns up to 50 rows plus an optional pagination token. */
+  private async fetchNewsPage(
+    params: URLSearchParams,
+  ): Promise<{ items: NewsItem[]; nextPageToken: string | null }> {
     const url = `${NEWS_BASE}?${params.toString()}`;
-    const raw = await this.request<{ news?: AlpacaNewsItem[] }>(url);
-    return (raw.news ?? []).map((n) => ({
-      title: n.headline,
-      source: n.source,
-      publishedAt: n.created_at,
-      url: n.url,
-      summary: n.summary,
-    }));
+    const raw = await this.request<AlpacaNewsResponse>(url);
+    const items = (raw.news ?? []).map(mapNewsItem);
+    const tok = raw.next_page_token;
+    const nextPageToken =
+      tok == null || tok === "" ? null : typeof tok === "string" ? tok : String(tok);
+    return { items, nextPageToken };
+  }
+
+  /**
+   * Follow `page_token` until exhausted. Hard cap prevents runaway loops if the
+   * API misbehaves (50 rows × 200 pages = 10,000 articles max).
+   */
+  private async fetchAllNewsPages(base: URLSearchParams): Promise<NewsItem[]> {
+    const MAX_PAGES = 200;
+    const aggregated: NewsItem[] = [];
+    const seen = new Set<string>();
+    let pageToken: string | null = null;
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const params = new URLSearchParams(base);
+      params.set("limit", "50");
+      if (pageToken) {
+        params.set("page_token", pageToken);
+      }
+      const { items, nextPageToken } = await this.fetchNewsPage(params);
+      for (const it of items) {
+        const key = `${it.publishedAt}\t${it.url}\t${it.title}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        aggregated.push(it);
+      }
+      if (!nextPageToken || items.length === 0) {
+        break;
+      }
+      pageToken = nextPageToken;
+    }
+    return aggregated;
   }
 
   private async request<T>(url: string, init: RequestInit = {}): Promise<T> {
@@ -224,6 +292,55 @@ interface AlpacaNewsItem {
   created_at: string;
   url: string;
   summary?: string;
+  symbols?: string[];
+}
+
+interface AlpacaNewsResponse {
+  news?: AlpacaNewsItem[];
+  next_page_token?: string | null;
+}
+
+function mapNewsItem(n: AlpacaNewsItem): NewsItem {
+  return {
+    title: n.headline,
+    source: n.source,
+    publishedAt: n.created_at,
+    url: n.url,
+    summary: n.summary,
+    symbols: n.symbols,
+  };
+}
+
+/** `AAPL`, `AAPL,MSFT`, ` brk.b , XOM ` → uppercased CSV for Alpaca `symbols`. */
+function parseSymbolCsvFromQuery(raw: string): string | null {
+  const q = raw.trim();
+  if (!q) return null;
+  if (q.includes(",")) {
+    const parts = q
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (parts.length === 0) return null;
+    if (!parts.every((p) => /^[A-Za-z0-9.^]{1,24}$/.test(p))) return null;
+    return parts.map((p) => p.toUpperCase()).join(",");
+  }
+  if (!/\s/.test(q) && /^[A-Za-z][A-Za-z0-9.]{0,23}$/.test(q)) {
+    return q.toUpperCase();
+  }
+  return null;
+}
+
+function normalizeSearchTokens(q: string): string[] {
+  return q
+    .toLowerCase()
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+}
+
+function articleMatchesTokens(it: NewsItem, tokens: string[]): boolean {
+  const blob = `${it.title} ${it.summary ?? ""}`.toLowerCase();
+  return tokens.every((t) => blob.includes(t));
 }
 
 function mapOrder(raw: AlpacaOrder): Order {

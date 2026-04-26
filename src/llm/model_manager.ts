@@ -18,8 +18,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import type { Config } from "../config.js";
+import type { Config, ModelProvider } from "../config.js";
 import { resolveModelCacheDir, writeConfig } from "../config.js";
+import { searchHubModels, type HubModelSummary } from "./hub_models.js";
 import {
   disposeLocalPipeline,
   getLocalPipeline,
@@ -57,9 +58,41 @@ export class ModelManager {
     return resolveModelCacheDir(this.config);
   }
 
-  /** Currently selected model id (may be empty before first install). */
+  /** Currently selected model id (may be empty before first install / API pick). */
   get activeId(): string {
     return this.config.model.id.trim();
+  }
+
+  get provider(): ModelProvider {
+    return this.config.model.provider;
+  }
+
+  /**
+   * Switch between local ONNX/transformers.js and Hugging Face Inference API.
+   * Clears the cached local pipeline when leaving local mode.
+   */
+  async setProvider(provider: ModelProvider): Promise<void> {
+    if (this.config.model.provider === provider) return;
+    this.config.model.provider = provider;
+    writeConfig(this.config);
+    await disposeLocalPipeline();
+  }
+
+  /**
+   * Use a Hub model id for remote inference (sets provider to huggingface_api).
+   */
+  async setRemoteInferenceModel(modelId: string): Promise<void> {
+    const id = modelId.trim();
+    if (!id) throw new Error("Model id is empty.");
+    this.config.model.provider = "huggingface_api";
+    this.config.model.id = id;
+    writeConfig(this.config);
+    await disposeLocalPipeline();
+  }
+
+  /** Search huggingface.co for public model ids (browse tab). */
+  async searchHub(query: string, limit = 30): Promise<HubModelSummary[]> {
+    return searchHubModels(query, limit);
   }
 
   /** Walk the cache directory and return one entry per `<org>/<repo>` subtree. */

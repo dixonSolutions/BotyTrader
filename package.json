@@ -1,7 +1,7 @@
 {
   "name": "botytrader",
   "version": "0.1.0",
-  "description": "Terminal-based AI trading assistant — Ink TUI, local Hugging Face ReAct agent, MCP tools, broker adapters, RAG memory.",
+  "description": "Terminal-based AI trading assistant — Ink TUI, local or Hugging Face Inference ReAct agent, MCP tools, broker adapters, RAG memory.",
   "type": "module",
   "license": "MIT",
   "bin": {
@@ -18,8 +18,11 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "dev": "NODE_NO_WARNINGS=1 tsx src/index.tsx",
-    "dev:watch": "NODE_NO_WARNINGS=1 tsx watch --clear-screen=false src/index.tsx",
+    "postinstall": "npm rebuild better-sqlite3",
+    "rebuild:native": "npm rebuild better-sqlite3",
+    "dev": "npm run build && NODE_NO_WARNINGS=1 node dist/index.js",
+    "dev:run": "NODE_NO_WARNINGS=1 node dist/index.js",
+    "dev:watch": "NODE_NO_WARNINGS=1 tsup --watch",
     "start": "NODE_NO_WARNINGS=1 node dist/index.js",
     "build": "tsup",
     "compile": "pkg dist/index.cjs --target node20-linux-x64 --output bin/botytrader",
@@ -31,16 +34,22 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.658.1",
     "@google/generative-ai": "^0.21.0",
+    "@huggingface/hub": "^0.21.0",
+    "@huggingface/inference": "^2.8.1",
     "@huggingface/transformers": "^4.1.0",
     "@iarna/toml": "^2.2.5",
     "@modelcontextprotocol/sdk": "^1.0.4",
+    "@pppp606/ink-chart": "^0.2.5",
+    "@zenobius/ink-mouse": "^1.0.3",
+    "better-sqlite3": "^11.10.0",
+    "chalk": "^5.3.0",
     "dotenv": "^16.4.5",
     "ink": "^5.0.1",
-    "ink-text-input": "^6.0.0",
     "react": "^18.3.1",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.7.4",
     "@types/react": "^18.3.11",
     "@typescript-eslint/eslint-plugin": "^8.8.1",

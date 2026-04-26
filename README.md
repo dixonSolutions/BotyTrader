@@ -1,6 +1,6 @@
 # BotyTrader
 
-**BotyTrader** is a terminal-based AI trading assistant. It combines an **Ink** TUI, a TypeScript **orchestrator** (watchlist + schedules + risk gates), a **local Hugging Face ReAct agent** (`@huggingface/transformers` + MCP tools — no remote LLM API key required), broker-agnostic **adapters** (Alpaca paper/live, Coinbase, Binance scaffolds), and an optional **memory** stack (Gemini Embedding API → Hugging Face Storage Bucket).
+**BotyTrader** is a terminal-based AI trading assistant. It combines an **Ink** TUI (with **[@zenobius/ink-mouse](https://github.com/zenobi-us/ink-mouse)** for pointer hit-testing; use a modern terminal with mouse support), a TypeScript **orchestrator** (watchlist + schedules + risk gates), a **local Hugging Face ReAct agent** (`@huggingface/transformers` + MCP tools — no remote LLM API key required), broker-agnostic **adapters** (Alpaca paper/live, Coinbase, Binance scaffolds), and an optional **memory** stack (Gemini Embedding API → Hugging Face Storage Bucket). Text input fields (search, secrets, ids) still use the keyboard to type. See [docs/tui.md](docs/tui.md).
 
 ## Quick start
 
@@ -34,9 +34,12 @@ You do **not** need to copy `.env.example` manually; the wizard will collect eac
 
 ```
 src/
-├── agent/loop.ts              ← RAG → ReAct (local HF model) → tool loop → decision JSON
+├── agent/loop.ts              ← RAG → ReAct (local or HF Inference API) → tool loop → decision JSON
+├── llm/inference.ts           ← routes generateAgentTurn to local or API
 ├── llm/local_model.ts         ← @huggingface/transformers wrapper (one pipeline / process)
-├── llm/model_manager.ts       ← list / pull / select / delete local models
+├── llm/hf_api_model.ts        ← @huggingface/inference (serverless chat / text-generation)
+├── llm/hub_models.ts          ← Hub JSON search (ModelManager; no Hub tab in TUI)
+├── llm/model_manager.ts       ← list / pull / select / delete; provider + remote id
 ├── actions/                   ← Orchestrator-only side effects (orders, memory)
 ├── execution/
 │   ├── broker.ts              ← BrokerAdapter interface

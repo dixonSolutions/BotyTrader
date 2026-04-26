@@ -8,6 +8,7 @@ import { Box, Text } from "ink";
 
 import { theme } from "../../theme.js";
 import type { OrchestratorState } from "../../../orchestrator.js";
+import { formatInsightLocal } from "./insightFormatters.js";
 
 interface Props {
   state: OrchestratorState;
@@ -34,7 +35,7 @@ export function AgentActivity({ state }: Props): React.ReactElement {
         <Text color={theme.color.muted}>Previous run (last exit) </Text>
         <Text color={theme.color.text}>
           {prev
-            ? `${fmtTs(prev.endedAt)} · ${prev.cyclesCompleted} cycle(s) · last ${prev.lastSymbol ?? "—"} ${prev.lastAction ?? ""}${prev.lastReasoningSnippet ? ` · “${prev.lastReasoningSnippet}”` : ""}`
+            ? `${formatInsightLocal(prev.endedAt)} · ${prev.cyclesCompleted} cycle(s) · last ${prev.lastSymbol ?? "—"} ${prev.lastAction ?? ""}${prev.lastReasoningSnippet ? ` · “${prev.lastReasoningSnippet}”` : ""}`
             : "No snapshot yet — quit once with `q` to save a summary."}
         </Text>
       </Box>
@@ -59,7 +60,7 @@ function formatNextCycle(state: OrchestratorState): string {
   if (state.watchlist.length === 0) return "Watchlist empty — add symbols in Config.";
   if (state.cycling) return "Timer held until this cycle finishes; then interval resumes.";
   if (!state.nextScheduledCycleAt) return "— (arming…)";
-  return `${relativeFromNow(state.nextScheduledCycleAt)} · ${fmtTs(state.nextScheduledCycleAt)} · every ${state.agentIntervalSeconds}s`;
+  return `${relativeFromNow(state.nextScheduledCycleAt)} · ${formatInsightLocal(state.nextScheduledCycleAt)} · every ${state.agentIntervalSeconds}s`;
 }
 
 function formatLive(state: OrchestratorState): string {
@@ -70,15 +71,6 @@ function formatLive(state: OrchestratorState): string {
   if (state.cycling) return "Working…";
   if (state.lastCycleAt) return `Idle · last cycle ${relativeFromNowPast(state.lastCycleAt)}`;
   return "Idle · no cycle completed yet this session.";
-}
-
-function fmtTs(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", month: "short", day: "numeric" });
-  } catch {
-    return iso;
-  }
 }
 
 function relativeFromNow(iso: string): string {

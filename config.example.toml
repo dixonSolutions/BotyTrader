@@ -6,9 +6,11 @@
 embedding_model = "text-embedding-004"
 
 [model]
-# Active local Hugging Face model id (e.g. "TigerTrading/TradingBot",
-# "onnx-community/Qwen2.5-0.5B-Instruct"). Empty = no model selected; install
-# one from the Models screen (press `m` on the Home screen).
+# local = transformers.js on disk (see cache_dir). huggingface_api = serverless
+# Inference API (requires HF_TOKEN in .env).
+provider = "local"
+# Active Hugging Face model id (org/repo). For local: ONNX-capable causal LM.
+# For huggingface_api: any Inference-supported chat/LM id from the Hub tab.
 id = ""
 # Quantisation hint forwarded to @huggingface/transformers.
 # One of: auto | fp32 | fp16 | q8 | q4 | q4f16
@@ -28,13 +30,43 @@ region = "us-east-1"
 
 [broker]
 # One of: alpaca_paper | alpaca_live | coinbase | binance
+# Paper is default. Simple trading engine uses Alpaca; Config → Trading can switch paper/live.
 platform = "alpaca_paper"
+
+[trading]
+# Deterministic simple strategy (SQLite, FinBERT) — set enabled = false to skip engine timers.
+enabled = true
+# paper | live — also sets broker platform to alpaca_paper or alpaca_live when using Alpaca.
+mode = "paper"
+database_path = "~/.config/trading-cli/trades.db"
+
+[strategy.simple]
+enabled = true
+technical_weight = 0.6
+sentiment_weight = 0.4
+buy_threshold = 0.5
+sell_threshold = -0.3
+sma_fast_period = 20
+sma_slow_period = 50
+rsi_period = 14
+# Neutral zone for SMA20 vs SMA50 crossover (fraction of last close, e.g. 0.001 = 0.1%).
+sma_neutral_band = 0.001
+
+[sentiment]
+# local_finbert / huggingface_api / disabled. Prefer ProsusAI/finbert as id; local Node pulls Xenova/finbert (ONNX).
+provider = "local_finbert"
+model_id = "ProsusAI/finbert"
+cache_ttl_hours = 24
 
 [schedule]
 # Seconds between agent cycles
 agent_interval_seconds = 300
 # Seconds between exit-monitor sweeps (stop-loss / take-profit)
 exit_monitor_interval_seconds = 30
+# Simple trading engine cycles
+portfolio_cycle_seconds = 300
+candidate_cycle_seconds = 1800
+discovery_cycle_seconds = 14400
 
 [risk]
 max_position_pct = 10.0
@@ -58,6 +90,8 @@ web_search_enabled = false
 [agent]
 # Hard cap on ReAct iterations per cycle.
 max_iterations = 8
+# 0 = favour technicals; 1 = favour sentiment/news in the cycle prompt (Config → Models: ±)
+sentiment_weight = 0.35
 # Optional. Customise the reasoning system prompt (must keep the Final JSON
 # decision contract intact, otherwise the orchestrator falls back to "hold").
 # system_prompt = """..."""

@@ -61,6 +61,14 @@ export interface NewsItem {
   publishedAt: string;
   url: string;
   summary?: string;
+  /** Related tickers when the feed provides them (e.g. Alpaca). */
+  symbols?: string[];
+}
+
+/** Options for {@link BrokerAdapter.searchNews}. */
+export interface NewsSearchOpts {
+  /** After pagination (and keyword filter), keep at most this many rows. Omit = no cap. */
+  maxArticles?: number;
 }
 
 export interface BrokerAdapter {
@@ -87,6 +95,13 @@ export interface BrokerAdapter {
    * The MCP `news` tool falls back to NewsAPI when this returns empty.
    */
   getNews?(symbol: string, limit: number): Promise<NewsItem[]>;
+
+  /**
+   * Optional rich news lookup: symbol list (`AAPL` or `AAPL,MSFT`) or free-text
+   * (fetches a broad feed and filters client-side when the API has no keyword param).
+   * Implementations should page until the feed ends (honour `maxArticles` if set).
+   */
+  searchNews?(query: string, opts?: NewsSearchOpts): Promise<NewsItem[]>;
 
   /**
    * Optional — best-effort top-of-book / depth snapshot. Implementations may

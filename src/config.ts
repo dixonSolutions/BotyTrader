@@ -9,12 +9,15 @@
  * secrets to "required" only when their broker is actually selected. This keeps
  * unused fields optional without weakening security for the active path.
  *
- * The reasoning LLM is now a *local* Hugging Face model executed in-process
- * via `@huggingface/transformers`. There is no remote LLM API key — model
- * downloads happen through the Models screen and are cached on disk.
+ * The reasoning LLM is either a *local* Hugging Face / ONNX model
+ * (`@huggingface/transformers`, cached on disk) or the **Hugging Face Inference
+ * API** (`@huggingface/inference`, requires `HF_TOKEN` in `.env`). Set
+ * `[model] id` in config.toml or under Config → Settings (active model).
+ * Sentiment uses FinBERT only — Config → Models.
  */
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import TOML from "@iarna/toml";
@@ -64,17 +67,28 @@ export type ModelDtype = z.infer<typeof ModelDtypeSchema>;
 export const ModelDeviceSchema = z.enum(["auto", "cpu", "wasm", "webgpu"]);
 export type ModelDevice = z.infer<typeof ModelDeviceSchema>;
 
+/** Where the ReAct “pilot” LLM runs — local ONNX/transformers.js vs HF serverless API. */
+export const ModelProviderSchema = z.enum(["local", "huggingface_api"]);
+export type ModelProvider = z.infer<typeof ModelProviderSchema>;
+
+/** Simple strategy paper vs live — maps to Alpaca broker platform. */
+export const TradingModeSchema = z.enum(["paper", "live"]);
+export type TradingMode = z.infer<typeof TradingModeSchema>;
+
+export const SentimentProviderSchema = z.enum(["local_finbert", "huggingface_api", "disabled"]);
+export type SentimentProvider = z.infer<typeof SentimentProviderSchema>;
+
 export const ConfigSchema = z.object({
   gemini: z.object({
     embedding_model: z.string().min(1).default("text-embedding-004"),
   }),
   /**
-   * Local reasoning model — selected via the Models screen.
-   * `id` is a Hugging Face repo id (e.g. `onnx-community/Qwen2.5-0.5B-Instruct`)
-   * or a local directory under `cache_dir`.
+   * Reasoning model — local (transformers.js + disk cache) or Hugging Face
+   * Inference API. `id` is the active HF model id in both cases.
    */
   model: z
     .object({
+      provider: ModelProviderSchema.default("local"),
       id: z.string().default(""),
       dtype: ModelDtypeSchema.default("q4"),
       device: ModelDeviceSchema.default("auto"),
@@ -90,9 +104,55 @@ export const ConfigSchema = z.object({
   broker: z.object({
     platform: BrokerPlatformSchema,
   }),
+  /**
+   * Deterministic stock trading engine (Alpaca) — see docs/simple-strategy.md.
+   * `trading.mode` is kept in sync with `broker.platform` for paper/live.
+   */
+  trading: z
+    .object({
+      enabled: z.boolean().default(true),
+      mode: TradingModeSchema.default("paper"),
+      /** Default: ~/.config/trading-cli/trades.db — tilde expanded at resolve time. */
+      database_path: z.string().min(1).default("~/.config/trading-cli/trades.db"),
+    })
+    .default({}),
+  /** Simple technical + FinBERT hybrid strategy parameters. */
+  strategy: z
+    .object({
+      simple: z
+        .object({
+          enabled: z.boolean().default(true),
+          technical_weight: z.number().min(0).max(1).default(0.6),
+          sentiment_weight: z.number().min(0).max(1).default(0.4),
+          buy_threshold: z.number().default(0.5),
+          sell_threshold: z.number().default(-0.3),
+          sma_fast_period: z.number().int().positive().default(20),
+          sma_slow_period: z.number().int().positive().default(50),
+          rsi_period: z.number().int().positive().default(14),
+          /** Fraction of price — spread below this between SMAs counts as neutral crossover. */
+          sma_neutral_band: z.number().min(0).max(0.1).default(0.001),
+        })
+        .default({}),
+    })
+    .default({}),
+  sentiment: z
+    .object({
+      provider: SentimentProviderSchema.default("local_finbert"),
+      /**
+       * Sentiment repo id. Use `ProsusAI/finbert` for API + docs; local Node
+       * loads the Transformers.js ONNX port `Xenova/finbert` automatically.
+       */
+      model_id: z.string().min(1).default("ProsusAI/finbert"),
+      /** Hours until sentiment_cache rows are ignored (re-score). */
+      cache_ttl_hours: z.number().positive().default(24),
+    })
+    .default({}),
   schedule: z.object({
     agent_interval_seconds: z.number().int().positive().default(300),
     exit_monitor_interval_seconds: z.number().int().positive().default(30),
+    portfolio_cycle_seconds: z.number().int().positive().default(300),
+    candidate_cycle_seconds: z.number().int().positive().default(1800),
+    discovery_cycle_seconds: z.number().int().positive().default(14_400),
   }),
   risk: z.object({
     max_position_pct: z.number().nonnegative().default(10),
@@ -119,6 +179,12 @@ export const ConfigSchema = z.object({
       system_prompt: z.string().min(1).default(DEFAULT_AGENT_SYSTEM_PROMPT),
       /** Hard cap on ReAct iterations per cycle. */
       max_iterations: z.number().int().positive().default(8),
+      /**
+       * How much to favour qualitative sentiment/news vs quantitative technicals
+       * when they conflict (0 = all technical, 1 = all sentiment). Injected into
+       * the cycle prompt; tools still supply raw facts.
+       */
+      sentiment_weight: z.number().min(0).max(1).default(0.35),
     })
     .default({}),
 });
@@ -155,7 +221,7 @@ export type Secrets = z.infer<typeof SecretsSchema>;
 /** Human-readable description for each secret — surfaced in the TUI Setup wizard. */
 export const SECRET_DESCRIPTIONS: Record<keyof Secrets, string> = {
   HF_TOKEN:
-    "Hugging Face token — only required for gated model repos and for writing to your memory bucket.",
+    "Hugging Face token — required for Inference API reasoning (model.provider = huggingface_api), gated local model downloads, and memory bucket writes when memory is enabled.",
   GEMINI_API_KEY:
     "Google Gemini API key — embeddings; required when features.memory_enabled is true (https://aistudio.google.com).",
   ALPACA_API_KEY: "Alpaca API key (paper or live, per config.toml).",
@@ -204,6 +270,37 @@ export function resolveModelCacheDir(config: Config, paths: Paths = resolvePaths
   return path.isAbsolute(dir) ? dir : path.join(paths.root, dir);
 }
 
+/**
+ * Expands `~/…` to the user home and resolves relative paths against the project root.
+ */
+export function expandUserPath(p: string): string {
+  const raw = p.trim();
+  if (!raw.startsWith("~")) return raw;
+  if (raw === "~" || raw === `~${path.sep}`) return os.homedir();
+  if (raw.startsWith(`~${path.sep}`)) {
+    return path.join(os.homedir(), raw.slice(2));
+  }
+  return raw;
+}
+
+/**
+ * Resolves `trading.database_path` to an absolute path.
+ */
+export function resolveTradingDatabasePath(config: Config, paths: Paths = resolvePaths()): string {
+  const raw = expandUserPath(config.trading.database_path);
+  const abs = path.isAbsolute(raw) ? path.normalize(raw) : path.join(paths.root, raw);
+  return path.normalize(abs);
+}
+
+/**
+ * When broker is Alpaca, mirror `broker.platform` into `trading.mode` (paper vs live).
+ * Call after `loadConfig` so a single file edit stays consistent.
+ */
+export function syncTradingModeFromBroker(config: Config): void {
+  if (config.broker.platform === "alpaca_paper") config.trading.mode = "paper";
+  else if (config.broker.platform === "alpaca_live") config.trading.mode = "live";
+}
+
 // ---------------------------------------------------------------------------
 // Loading
 // ---------------------------------------------------------------------------
@@ -221,7 +318,9 @@ export function loadConfig(paths: Paths = resolvePaths()): Config {
   }
   const raw = fs.readFileSync(paths.configToml, "utf8");
   const parsed = TOML.parse(raw) as unknown;
-  return ConfigSchema.parse(parsed);
+  const config = ConfigSchema.parse(parsed);
+  syncTradingModeFromBroker(config);
+  return config;
 }
 
 /** Result of secrets validation — either OK with values, or missing key list for the wizard. */
@@ -257,6 +356,14 @@ export function loadSecrets(
       const v = process.env[key];
       if (!v || v.trim() === "") missing.add(key);
     }
+  }
+  if (config.model.provider === "huggingface_api") {
+    const v = process.env.HF_TOKEN;
+    if (!v || v.trim() === "") missing.add("HF_TOKEN");
+  }
+  if (config.sentiment.provider === "huggingface_api") {
+    const v = process.env.HF_TOKEN;
+    if (!v || v.trim() === "") missing.add("HF_TOKEN");
   }
   if (config.features.web_search_enabled) {
     const v = process.env.BRAVE_API_KEY;

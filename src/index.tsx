@@ -9,9 +9,12 @@
  */
 
 import React from "react";
-import { render } from "ink";
+import { render, useInput } from "ink";
+import { MouseProvider } from "@zenobius/ink-mouse";
 
 import { App } from "./tui/app.js";
+import { AlternateScreen } from "./tui/AlternateScreen.js";
+import { ViewportRoot } from "./tui/ViewportRoot.js";
 import { Setup } from "./tui/screens/Setup.js";
 import {
   loadConfig,
@@ -27,6 +30,17 @@ import { HfBucket } from "./memory/hf.js";
 import { MemoryStore } from "./memory/store.js";
 import { Orchestrator } from "./orchestrator.js";
 import { ModelManager } from "./llm/model_manager.js";
+
+/**
+ * Ink only enables TTY raw mode while a `useInput` hook is active. Screens without a
+ * text field (e.g. Home) would otherwise leave echo on, so SGR mouse bytes show as
+ * `^[[<…` noise. A no-op listener keeps stdin raw for the whole session; Ctrl+C is
+ * still handled by Ink before this callback runs.
+ */
+function KeepStdinRaw(): null {
+  useInput(() => {}, { isActive: true });
+  return null;
+}
 
 async function bootstrap(config: Config, secrets: Secrets): Promise<Orchestrator> {
   const broker = createBrokerAdapter(config.broker.platform, secrets);
@@ -58,20 +72,39 @@ async function main(): Promise<void> {
 
   if (result.ok) {
     const orchestrator = await bootstrap(config, result.secrets);
-    render(<App orchestrator={orchestrator} />);
+    render(
+      <MouseProvider>
+        <AlternateScreen />
+        <KeepStdinRaw />
+        <ViewportRoot>
+          <App orchestrator={orchestrator} />
+        </ViewportRoot>
+      </MouseProvider>,
+    );
     return;
   }
 
   // Render the Setup wizard; once complete, re-validate and continue the flow.
   await new Promise<void>((resolve) => {
     const ink = render(
-      <Setup
-        missing={result.missing}
-        onComplete={() => {
-          ink.unmount();
-          resolve();
-        }}
-      />,
+      <MouseProvider>
+        <AlternateScreen />
+        <KeepStdinRaw />
+        <ViewportRoot>
+          <Setup
+            brokerName={config.broker.platform}
+            missing={result.missing}
+            onComplete={() => {
+              ink.unmount();
+              resolve();
+            }}
+            onAbort={() => {
+              ink.unmount();
+              process.exit(0);
+            }}
+          />
+        </ViewportRoot>
+      </MouseProvider>,
     );
   });
 

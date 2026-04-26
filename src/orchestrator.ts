@@ -17,7 +17,17 @@ import { submitOrder, type SubmitOrderResult } from "./actions/alpaca.js";
 import { summarizeToMemory } from "./actions/memory.js";
 import type { Decision } from "./actions/types.js";
 import { resolvePaths, writeConfig, type Config, type Secrets } from "./config.js";
-import type { AccountSummary, BrokerAdapter, Order, Position } from "./execution/broker.js";
+import type { TradingMode } from "./config.js";
+import { createBrokerAdapter } from "./execution/adapters/index.js";
+import { TradingEngine, type TradingEngineStatus } from "./trading/engine.js";
+import type { SignalRow } from "./trading/types.js";
+import {
+  installLocalSentimentWeights,
+  removeLocalSentimentArtifacts,
+  SUPPORTED_SENTIMENT_REPO_ID,
+  type SentimentInstallProgress,
+} from "./trading/sentiment/finbert.js";
+import type { AccountSummary, BrokerAdapter, NewsItem, Order, Position } from "./execution/broker.js";
 import { ExitMonitor, type ExitEvent } from "./execution/exit_monitor.js";
 import type { WorkingMemoryStore } from "./memory/disabled_store.js";
 import { MemoryStore } from "./memory/store.js";
@@ -85,6 +95,16 @@ export interface OrchestratorState {
   agentLive: AgentLiveState | null;
   /** Reasoning text from the most recently completed cycle (cleared on new cycle start). */
   lastCompletedReasoning: string | null;
+  /** Deterministic simple-strategy engine status (FinBERT, DB, Alpaca). */
+  trading: TradingEngineStatus;
+  /** True while a trading engine cycle (portfolio/candidate) is in flight. */
+  tradingBusy: boolean;
+  portfolioCycleSeconds: number;
+  candidateCycleSeconds: number;
+  discoveryCycleSeconds: number;
+  tradingMode: TradingMode;
+  /** Latest rows from `signals` table (simple strategy audit). */
+  recentTradingSignals: SignalRow[];
 }
 
 export type StateListener = (state: OrchestratorState) => void;
@@ -106,18 +126,24 @@ export interface OrchestratorOptions {
 export class Orchestrator {
   readonly config: Config;
   readonly secrets: Secrets;
-  readonly broker: BrokerAdapter;
+  /** Swapped at runtime when paper/live (Alpaca) changes — do not hold stale references. */
+  broker: BrokerAdapter;
   readonly memory: WorkingMemoryStore;
   readonly models: ModelManager;
-  readonly exitMonitor: ExitMonitor;
+  exitMonitor: ExitMonitor;
+  readonly tradingEngine: TradingEngine;
 
-  private readonly ctx: ToolContext;
+  private ctx: ToolContext;
   private readonly listeners = new Set<StateListener>();
   private state: OrchestratorState;
   private timer: NodeJS.Timeout | null = null;
   private pingTimer: NodeJS.Timeout | null = null;
+  private portfolioTimer: NodeJS.Timeout | null = null;
+  private candidateTimer: NodeJS.Timeout | null = null;
+  private discoveryTimer: NodeJS.Timeout | null = null;
   private rotationIndex = 0;
   private cycleInFlight = false;
+  private tradingCycleInFlight = false;
   private paused = false;
   /** Completed agent cycles this process (used for session snapshot on stop). */
   private sessionCycleCount = 0;
@@ -130,6 +156,7 @@ export class Orchestrator {
     this.models = opts.models;
     this.ctx = { broker: opts.broker, secrets: opts.secrets };
     this.exitMonitor = new ExitMonitor(opts.broker, opts.config);
+    this.tradingEngine = new TradingEngine(opts.config, opts.secrets, opts.broker);
 
     const paths = resolvePaths();
     this.state = {
@@ -154,6 +181,13 @@ export class Orchestrator {
       nextScheduledCycleAt: null,
       agentLive: null,
       lastCompletedReasoning: null,
+      trading: this.tradingEngine.getStatus(),
+      tradingBusy: false,
+      portfolioCycleSeconds: this.config.schedule.portfolio_cycle_seconds,
+      candidateCycleSeconds: this.config.schedule.candidate_cycle_seconds,
+      discoveryCycleSeconds: this.config.schedule.discovery_cycle_seconds,
+      tradingMode: this.config.trading.mode,
+      recentTradingSignals: [],
     };
 
     this.exitMonitor.onExit((e) => this.onExitEvent(e));
@@ -165,6 +199,9 @@ export class Orchestrator {
 
   async start(): Promise<void> {
     this.log("info", `Starting orchestrator with broker ${this.broker.name}`);
+    this.tradingEngine.refreshReadiness();
+    await this.tradingEngine.warmSentimentModel();
+    this.pushTradingState();
     await this.measurePing();
 
     if (this.config.features.memory_enabled) {
@@ -178,6 +215,7 @@ export class Orchestrator {
     this.exitMonitor.start();
     this.startPingLoop();
     this.scheduleNext();
+    this.scheduleTradingCycles();
   }
 
   stop(): void {
@@ -189,6 +227,8 @@ export class Orchestrator {
       clearInterval(this.pingTimer);
       this.pingTimer = null;
     }
+    this.clearTradingTimers();
+    this.tradingEngine.close();
     this.exitMonitor.stop();
     this.persistSessionSnapshot();
     this.update({ cycling: false, nextScheduledCycleAt: null, agentLive: null });
@@ -202,6 +242,7 @@ export class Orchestrator {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    this.clearTradingTimers();
     this.exitMonitor.stop();
     this.update({ status: "paused", nextScheduledCycleAt: null });
     this.log("info", "Orchestrator paused.");
@@ -212,6 +253,7 @@ export class Orchestrator {
     this.paused = false;
     this.exitMonitor.start();
     this.scheduleNext();
+    this.scheduleTradingCycles();
     this.update({ status: "running" });
     this.log("info", "Orchestrator resumed.");
   }
@@ -279,6 +321,21 @@ export class Orchestrator {
     }
   }
 
+  /**
+   * Persist `agent.sentiment_weight` (0 = technical-heavy, 1 = sentiment-heavy).
+   * Used from Config → Models (agent blend ±).
+   */
+  setSentimentWeight(weight: number): void {
+    if (!Number.isFinite(weight)) {
+      this.log("warn", `Ignoring invalid sentiment_weight: ${weight}`);
+      return;
+    }
+    const w = Math.max(0, Math.min(1, weight));
+    this.config.agent.sentiment_weight = w;
+    writeConfig(this.config);
+    this.log("info", `Sentiment vs technical blend set to ${(w * 100).toFixed(0)}% sentiment / ${((1 - w) * 100).toFixed(0)}% technical.`);
+  }
+
   setWatchlist(symbols: string[]): void {
     const unique = Array.from(new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean)));
     this.config.watchlist.symbols = unique;
@@ -319,6 +376,281 @@ export class Orchestrator {
   /** Manual ping — Insights footer hint binds this. */
   async pingNow(): Promise<void> {
     await this.measurePing();
+  }
+
+  /**
+   * Alpaca Market Data news: pages at 50/request until the feed ends; tickers use
+   * `symbols=`; phrases match keywords across the full fetched set.
+   */
+  async searchAlpacaNews(
+    query: string,
+  ): Promise<{ ok: true; items: NewsItem[] } | { ok: false; error: string }> {
+    const q = query.trim();
+    if (!q) {
+      return { ok: false, error: "Enter a symbol or keywords to search." };
+    }
+    if (!this.broker.searchNews) {
+      return { ok: false, error: "News search requires an Alpaca broker (paper or live)." };
+    }
+    try {
+      const items = await this.broker.searchNews(q);
+      return { ok: true, items };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Trading engine (simple strategy + FinBERT)
+  // -------------------------------------------------------------------------
+
+  setTradingMode(mode: TradingMode): void {
+    this.config.trading.mode = mode;
+    if (this.config.broker.platform === "alpaca_paper" || this.config.broker.platform === "alpaca_live") {
+      this.config.broker.platform = mode === "live" ? "alpaca_live" : "alpaca_paper";
+    }
+    writeConfig(this.config);
+    if (this.config.broker.platform === "alpaca_paper" || this.config.broker.platform === "alpaca_live") {
+      const next = createBrokerAdapter(this.config.broker.platform, this.secrets);
+      this.broker = next;
+      this.tradingEngine.setBroker(next);
+      this.ctx = { broker: next, secrets: this.secrets };
+      this.exitMonitor.stop();
+      this.exitMonitor = new ExitMonitor(next, this.config);
+      this.exitMonitor.onExit((e) => this.onExitEvent(e));
+      if (!this.paused) this.exitMonitor.start();
+      void this.measurePing();
+    }
+    this.update({ tradingMode: mode, brokerName: this.broker.name, trading: this.tradingEngine.getStatus() });
+    this.log("info", `Trading mode: ${mode} (broker: ${this.config.broker.platform})`);
+  }
+
+  setTradingEnabled(enabled: boolean): void {
+    this.config.trading.enabled = enabled;
+    writeConfig(this.config);
+    this.tradingEngine.refreshReadiness();
+    this.pushTradingState();
+    this.log("info", `Trading engine ${enabled ? "enabled" : "disabled"}.`);
+  }
+
+  setSimpleStrategyEnabled(enabled: boolean): void {
+    this.config.strategy.simple.enabled = enabled;
+    writeConfig(this.config);
+    this.pushTradingState();
+  }
+
+  setSimpleStrategyNumeric(
+    field:
+      | "technical_weight"
+      | "sentiment_weight"
+      | "buy_threshold"
+      | "sell_threshold"
+      | "sma_neutral_band",
+    value: number,
+  ): void {
+    if (!Number.isFinite(value)) return;
+    this.config.strategy.simple[field] = value;
+    writeConfig(this.config);
+    this.pushTradingState();
+  }
+
+  setSimpleStrategyInt(
+    field: "sma_fast_period" | "sma_slow_period" | "rsi_period",
+    value: number,
+  ): void {
+    if (!Number.isFinite(value) || value < 1) return;
+    this.config.strategy.simple[field] = Math.floor(value);
+    writeConfig(this.config);
+    this.pushTradingState();
+  }
+
+  setTradingDatabasePath(p: string): void {
+    this.config.trading.database_path = p.trim();
+    writeConfig(this.config);
+    this.tradingEngine.close();
+    this.tradingEngine.refreshReadiness();
+    this.pushTradingState();
+  }
+
+  setSentimentConfig(patch: { provider: Config["sentiment"]["provider"]; modelId?: string; cacheTtlHours?: number }): void {
+    const prevP = this.config.sentiment.provider;
+    const prevM = this.config.sentiment.model_id;
+    this.config.sentiment.provider = patch.provider;
+    if (patch.modelId != null) this.config.sentiment.model_id = patch.modelId.trim();
+    if (patch.cacheTtlHours != null && Number.isFinite(patch.cacheTtlHours) && patch.cacheTtlHours > 0) {
+      this.config.sentiment.cache_ttl_hours = patch.cacheTtlHours;
+    }
+    writeConfig(this.config);
+    const rewarm = patch.provider !== prevP || (patch.modelId != null && patch.modelId.trim() !== prevM);
+    if (rewarm) {
+      void this.warmSentimentModel();
+    } else {
+      this.pushTradingState();
+    }
+  }
+
+  async warmSentimentModel(): Promise<void> {
+    await this.tradingEngine.warmSentimentModel();
+    this.pushTradingState();
+  }
+
+  /**
+   * Pull FinBERT classification files into the local cache, then set
+   * `local_finbert` + official repo id and warm. Use when the engine reports
+   * sentiment not ready under local FinBERT.
+   */
+  async installSentimentFinbert(opts?: {
+    onProgress?: (p: SentimentInstallProgress) => void;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    const { onProgress, signal } = opts ?? {};
+    await installLocalSentimentWeights(this.config, onProgress, signal, this.secrets);
+    if (signal?.aborted) {
+      throw new DOMException("Install cancelled", "AbortError");
+    }
+    this.config.sentiment.provider = "local_finbert";
+    this.config.sentiment.model_id = SUPPORTED_SENTIMENT_REPO_ID;
+    writeConfig(this.config);
+    await this.tradingEngine.warmSentimentModel();
+    this.pushTradingState();
+  }
+
+  /**
+   * Deletes the on-disk Transformers.js cache folder for the current local
+   * sentiment repo (see `localSentimentPipelineModelId`). Hub is not involved;
+   * re-install pulls from the Hub again.
+   */
+  async removeSentimentFinbertLocal(): Promise<{ path: string; removed: boolean }> {
+    const r = await removeLocalSentimentArtifacts(this.config);
+    await this.tradingEngine.warmSentimentModel();
+    this.pushTradingState();
+    return r;
+  }
+
+  setTradingCycleInterval(
+    field: "portfolio" | "candidate" | "discovery",
+    seconds: number,
+  ): void {
+    if (!Number.isFinite(seconds) || seconds < 1) return;
+    const s = Math.floor(seconds);
+    if (field === "portfolio") {
+      this.config.schedule.portfolio_cycle_seconds = s;
+      this.update({ portfolioCycleSeconds: s });
+    } else if (field === "candidate") {
+      this.config.schedule.candidate_cycle_seconds = s;
+      this.update({ candidateCycleSeconds: s });
+    } else {
+      this.config.schedule.discovery_cycle_seconds = s;
+      this.update({ discoveryCycleSeconds: s });
+    }
+    writeConfig(this.config);
+    if (!this.paused) {
+      this.clearTradingTimers();
+      this.scheduleTradingCycles();
+    }
+  }
+
+  /** Run portfolio then candidate (watchlist) evaluation once. */
+  async runTradingNow(): Promise<void> {
+    if (this.tradingCycleInFlight) {
+      this.log("warn", "Trading cycle already running.");
+      return;
+    }
+    this.tradingCycleInFlight = true;
+    this.update({ tradingBusy: true });
+    try {
+      await this.tradingEngine.runPortfolioCycle();
+      await this.tradingEngine.runCandidateCycle();
+      await this.refreshAccount();
+    } catch (e) {
+      this.log("error", `Trading cycle: ${describe(e)}`);
+    } finally {
+      this.tradingCycleInFlight = false;
+      this.pushTradingState();
+      this.update({ tradingBusy: false });
+    }
+  }
+
+  private pushTradingState(): void {
+    this.tradingEngine.refreshReadiness();
+    this.update({
+      trading: this.tradingEngine.getStatus(),
+      tradingMode: this.config.trading.mode,
+      recentTradingSignals: this.tradingEngine.listRecentSignals(60),
+    });
+  }
+
+  private clearTradingTimers(): void {
+    if (this.portfolioTimer) {
+      clearInterval(this.portfolioTimer);
+      this.portfolioTimer = null;
+    }
+    if (this.candidateTimer) {
+      clearInterval(this.candidateTimer);
+      this.candidateTimer = null;
+    }
+    if (this.discoveryTimer) {
+      clearInterval(this.discoveryTimer);
+      this.discoveryTimer = null;
+    }
+  }
+
+  private scheduleTradingCycles(): void {
+    this.clearTradingTimers();
+    if (this.paused || !this.config.trading.enabled) {
+      this.pushTradingState();
+      return;
+    }
+    this.portfolioTimer = setInterval(() => {
+      if (this.paused || this.tradingCycleInFlight) return;
+      this.tradingCycleInFlight = true;
+      this.update({ tradingBusy: true });
+      void (async () => {
+        try {
+          await this.tradingEngine.runPortfolioCycle();
+          await this.refreshAccount();
+        } catch (e) {
+          this.log("error", `Portfolio trading: ${describe(e)}`);
+        } finally {
+          this.tradingCycleInFlight = false;
+          this.pushTradingState();
+          this.update({ tradingBusy: false });
+        }
+      })();
+    }, this.config.schedule.portfolio_cycle_seconds * 1000);
+
+    this.candidateTimer = setInterval(() => {
+      if (this.paused || this.tradingCycleInFlight) return;
+      this.tradingCycleInFlight = true;
+      this.update({ tradingBusy: true });
+      void (async () => {
+        try {
+          await this.tradingEngine.runCandidateCycle();
+          await this.refreshAccount();
+        } catch (e) {
+          this.log("error", `Candidate trading: ${describe(e)}`);
+        } finally {
+          this.tradingCycleInFlight = false;
+          this.pushTradingState();
+          this.update({ tradingBusy: false });
+        }
+      })();
+    }, this.config.schedule.candidate_cycle_seconds * 1000);
+
+    this.discoveryTimer = setInterval(() => {
+      if (this.paused) return;
+      void (async () => {
+        try {
+          await this.tradingEngine.runDiscoveryCycle();
+        } catch (e) {
+          this.log("error", `Discovery: ${describe(e)}`);
+        } finally {
+          this.pushTradingState();
+        }
+      })();
+    }, this.config.schedule.discovery_cycle_seconds * 1000);
+
+    this.pushTradingState();
   }
 
   // -------------------------------------------------------------------------
@@ -386,7 +718,7 @@ export class Orchestrator {
     if (!this.models.activeId) {
       this.log(
         "warn",
-        `No local model selected. Open the Models screen (m from Home) to install one.`,
+        `No reasoning model selected. Set Config → Settings → Active local model, or [model] id in config.toml (and HF Inference API + id if using remote).`,
       );
       return;
     }
@@ -526,7 +858,12 @@ export class Orchestrator {
       ]);
       const sample: EquitySample = { ts: new Date().toISOString(), equity: account.equity };
       const equityHistory = [...this.state.equityHistory, sample].slice(-EQUITY_HISTORY_MAX);
-      this.update({ account, positions, equityHistory });
+      this.update({
+        account,
+        positions,
+        equityHistory,
+        recentTradingSignals: this.tradingEngine.listRecentSignals(60),
+      });
     } catch (err) {
       this.log("warn", `Account refresh failed: ${describe(err)}`);
     }

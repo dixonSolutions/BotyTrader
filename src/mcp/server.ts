@@ -7,7 +7,14 @@
  * and call the same tools.
  *
  * Run with `npm run mcp` (uses tsx) for development.
+ *
+ * Standalone stdio must **not** start when this module is bundled into the
+ * main TUI (`dist/index.js`): a loose `import.meta.url === argv` check would
+ * match the bundle entry, attach a second stdin consumer, and break Ink /
+ * Buffer.concat in the MCP transport.
  */
+
+import path from "node:path";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -78,12 +85,15 @@ export async function callTool(
   return tool.handler(args, ctx);
 }
 
-// Allow running this file directly: `tsx src/mcp/server.ts`
-const isDirect =
-  import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1]?.endsWith("server.ts") ||
-  process.argv[1]?.endsWith("server.js");
-if (isDirect) {
+function launchedAsMcpStdioServer(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  const norm = path.resolve(entry).replace(/\\/g, "/");
+  return /\/mcp\/server\.(ts|js|cjs|mjs)$/.test(norm);
+}
+
+// `npm run mcp` → `tsx src/mcp/server.ts` (path ends with `/mcp/server.ts`)
+if (launchedAsMcpStdioServer()) {
   runStandaloneMcpServer().catch((err) => {
     console.error("MCP server failed:", err);
     process.exit(1);

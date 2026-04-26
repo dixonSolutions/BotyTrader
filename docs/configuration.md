@@ -13,11 +13,13 @@ Comments below illustrate purpose; exact keys may be adjusted in code — keep t
 # BotyTrader — non-secret behaviour settings
 
 [gemini]
-# Gemini model used for embeddings (memory only — the reasoning LLM is local)
+# Gemini model used for embeddings (memory only — reasoning LLM is separate)
 embedding_model = "text-embedding-004"
 
 [model]
-# Active local Hugging Face model id (manage installs from the Models screen)
+# local | huggingface_api — see docs/models.md
+provider = "local"
+# Active Hugging Face model id (local ONNX path or remote Inference id)
 id = ""
 # Quantisation: auto | fp32 | fp16 | q8 | q4 | q4f16
 dtype = "q4"
@@ -37,8 +39,34 @@ bucket_name = "your-username/botytrader-memory"
 platform = "alpaca_paper"
 
 [schedule]
-# Cron-like or interval seconds — implementation-specific
 agent_interval_seconds = 300
+exit_monitor_interval_seconds = 30
+portfolio_cycle_seconds = 300
+candidate_cycle_seconds = 1800
+discovery_cycle_seconds = 14400
+
+[trading]
+enabled = true
+# paper | live — for Alpaca, matches broker platform; Config → Trading or broker enum both update this.
+mode = "paper"
+database_path = "~/.config/trading-cli/trades.db"
+
+[strategy.simple]
+enabled = true
+technical_weight = 0.6
+sentiment_weight = 0.4
+buy_threshold = 0.50
+sell_threshold = -0.30
+sma_fast_period = 20
+sma_slow_period = 50
+rsi_period = 14
+sma_neutral_band = 0.001
+
+[sentiment]
+# local_finbert | disabled | huggingface_api (serverless, requires HF_TOKEN)
+provider = "local_finbert"
+model_id = "Xenova/finbert"
+cache_ttl_hours = 24
 
 [risk]
 max_position_pct = 10.0
@@ -59,6 +87,8 @@ web_search_enabled = false
 [agent]
 # Hard cap on ReAct iterations per cycle
 max_iterations = 8
+# Prompt blend: 0 = technical-heavy, 1 = sentiment/news-heavy
+sentiment_weight = 0.35
 # Optional — system prompt (default lives in code as DEFAULT_AGENT_SYSTEM_PROMPT)
 # system_prompt = """..."""
 ```
@@ -67,16 +97,19 @@ max_iterations = 8
 
 | Section | Purpose |
 |---------|---------|
-| `gemini` | Gemini embedding model id (memory only — the reasoning LLM is local). |
-| `model` | Active local HF model + dtype, device, token budget, and on-disk cache directory. |
+| `gemini` | Gemini embedding model id (memory only). |
+| `model` | `provider`, active `id`, local dtype/device/token cap, and `cache_dir` for downloads. |
 | `huggingface` | HF Storage Bucket name for the vector index. |
 | `broker` | Which `BrokerAdapter` to instantiate. |
-| `schedule` | How often the agent cycle runs. |
+| `schedule` | Agent interval, exit monitor, and trading engine cycles (portfolio, candidate, discovery). |
+| `trading` | Enable simple engine, paper/live, SQLite path — see [Simple strategy](simple-strategy.md). |
+| `strategy.simple` | Technical + FinBERT signal weights, thresholds, and indicator periods. |
+| `sentiment` | FinBERT (local or HF API) and headline cache TTL. |
 | `risk` | Gates for position size, confidence, stops. |
 | `watchlist` | Default symbols for cycles and TUI. |
 | `autotrade` | Master switch for real/paper order submission. |
 | `features` | `memory_enabled` — RAG + HF writes (requires `GEMINI_API_KEY` + `HF_TOKEN`); `web_search_enabled` — register `brave_web_search` when a Brave key is set. Keys stay in `.env` when off. |
-| `agent` | `system_prompt` for the local ReAct cycle (Final JSON contract must still parse) and `max_iterations` cap. |
+| `agent` | `system_prompt`, `max_iterations`, and `sentiment_weight` (ReAct prompt blend; see [Models](models.md)). |
 
 ## `.env` secrets
 
@@ -85,7 +118,7 @@ Copy from `.env.example` and fill values locally.
 ```bash
 # .env.example — copy to .env and fill in values
 
-# Hugging Face token (optional — only needed for gated repos and memory bucket writes)
+# Hugging Face token — required when model.provider = huggingface_api; with memory; gated local pulls
 # HF_TOKEN=hf_xxxxxxxxxxxx
 
 # Embeddings (required only when features.memory_enabled = true)
@@ -134,7 +167,7 @@ const SecretsSchema = z.object({
 type Secrets = z.infer<typeof SecretsSchema>;
 ```
 
-**Conditional validation:** After reading `config.toml`, require broker keys for the selected platform; require `GEMINI_API_KEY` and `HF_TOKEN` when `features.memory_enabled` is true; require `BRAVE_API_KEY` when `features.web_search_enabled` is true. Turning features off does not remove keys from `.env` — the app simply skips those integrations. **There is no LLM API key** — the reasoning model is downloaded locally and managed from the Models screen.
+**Conditional validation:** After reading `config.toml`, require broker keys for the selected platform; require `GEMINI_API_KEY` and `HF_TOKEN` when `features.memory_enabled` is true; require `BRAVE_API_KEY` when `features.web_search_enabled` is true. Turning features off does not remove keys from `.env` — the app simply skips those integrations. **There is no LLM API key** — set the reasoning model id under **Config → Settings** or `[model] id` in `config.toml`. FinBERT sentiment is **Config → Models** ([ProsusAI/finbert](https://huggingface.co/ProsusAI/finbert) only).
 
 ## Startup validation flow
 
@@ -163,22 +196,18 @@ The `.env` file is created automatically if it does not exist. Already-set keys 
 
 If a credential becomes invalid after launch (key rotated, wrong value, expired token) you do **not** need to edit `.env` manually:
 
-1. Press `c` from Home to open **Config**, then `2` for the **Secrets** tab.
+1. From **Home**, click **Config**, then the **Secrets** tab.
 2. All `.env` keys are listed with their set/unset status (values masked).
-3. Select a key and press `Enter` to re-enter it.
-4. On confirmation the orchestrator writes the new value to `.env` and reloads secrets without restarting.
+3. Click a key, type the new value in the masked field, then **Save**.
+4. The orchestrator writes the new value to `.env` and reloads secrets without restarting.
 
 This is the recommended recovery path for any authentication error surfaced in the Agent Log or Dashboard.
 
 ## Managing local models
 
-The reasoning LLM is a local Hugging Face model loaded via `@huggingface/transformers`. Manage it from the **Models** screen (press `m` from Home):
+The reasoning LLM is a Hugging Face `org/repo` id loaded via `@huggingface/transformers` (local) or the Inference API (remote). In the TUI, set **Config → Settings → Active local model** (or edit `[model]` in `config.toml`). Weights cache under `config.model.cache_dir` (default `./.cache/models`). Use the [Hub](https://huggingface.co/models) in a browser to pick a compatible **text-generation** model id, then paste it into Settings.
 
-- **Installed** — list every model already on disk; press `Enter` to make one active, `d` then `Enter` to delete.
-- **Install** — pick a curated suggestion (including `TigerTrading/TradingBot`) or press `t` to install any HF repo id. Progress is reported per file in real time.
-- **Details** — read-only inspector for the focused model (size, mtime, path).
-
-Every byte lives under `config.model.cache_dir` (default `./.cache/models`) so users can always audit, back up, or wipe their on-disk footprint.
+FinBERT for trading sentiment is configured only under **Config → Models**; supported classifier repo is [ProsusAI/finbert](https://huggingface.co/ProsusAI/finbert) — see [Models](models.md).
 
 ## Safe vs secret
 

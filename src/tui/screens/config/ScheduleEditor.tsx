@@ -1,18 +1,15 @@
 /**
- * Schedule editor — change how often the bot runs without restarting.
- *
- * Both intervals are in seconds. The agent interval reschedules immediately
- * via `orchestrator.setAgentInterval`; the exit-monitor interval is written
- * to config.toml and takes effect on next monitor restart (pause/resume).
- *
- * `/` opens global search (all tabs). `f` toggles in-tab filter.
+ * Schedule editor — change how often the bot runs. Pointer rows + value editing.
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Box, Text, useInput } from "ink";
-import TextInput from "ink-text-input";
+import { Box, Text } from "ink";
+import TextInput from "../../components/SafeTextInput.js";
 
+import { Button } from "../../components/Button.js";
+import { ClickableRow } from "../../components/ClickableRow.js";
 import { Panel, StatRow } from "../../components/Layout.js";
+import { icons } from "../../components/icons.js";
 import { theme } from "../../theme.js";
 import { writeConfig } from "../../../config.js";
 import type { Orchestrator } from "../../../orchestrator.js";
@@ -22,12 +19,14 @@ interface Props {
   active: boolean;
   focusRowId?: string | null;
   onFocusRowConsumed?: () => void;
-  onOpenGlobalSearch?: () => void;
 }
 
 const FIELDS = [
   { id: "agent", label: "Agent cycle interval (seconds)" },
   { id: "exit", label: "Exit monitor interval (seconds)" },
+  { id: "portfolio", label: "Portfolio trading cycle (seconds)" },
+  { id: "candidate", label: "Watchlist / candidate cycle (seconds)" },
+  { id: "discovery", label: "Discovery cycle (seconds)" },
 ] as const;
 
 type FieldId = (typeof FIELDS)[number]["id"];
@@ -37,16 +36,16 @@ export function ScheduleEditor({
   active,
   focusRowId,
   onFocusRowConsumed,
-  onOpenGlobalSearch,
 }: Props): React.ReactElement {
   const { config } = orchestrator;
-  const [cursor, setCursor] = useState(0);
+  const [selectedIdx, setSelectedIdx] = useState(0);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [filterMode, setFilterMode] = useState(false);
   const [filterQuery, setFilterQuery] = useState("");
   const consumeRef = useRef(onFocusRowConsumed);
   consumeRef.current = onFocusRowConsumed;
+  void active;
 
   const visibleFields = useMemo(() => {
     const q = filterQuery.trim().toLowerCase();
@@ -62,64 +61,25 @@ export function ScheduleEditor({
     if (focusRowId == null) return;
     setFilterMode(false);
     setFilterQuery("");
-    const idx = FIELDS.findIndex((f) => f.id === focusRowId);
-    if (idx >= 0) setCursor(idx);
-    consumeRef.current?.();
   }, [focusRowId]);
 
-  useInput(
-    (input, key) => {
-      if (editing) return;
-      if (filterMode) {
-        if (input === "f") {
-          setFilterMode(false);
-          setFilterQuery("");
-          return;
-        }
-        if (key.backspace || key.delete) {
-          setFilterQuery((q) => q.slice(0, -1));
-          setCursor(0);
-          return;
-        }
-        if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
-        else if (key.downArrow) setCursor((c) => Math.min(visibleFields.length - 1, c + 1));
-        else if (key.return) {
-          const field = visibleFields[cursor];
-          if (field) {
-            setEditing(true);
-            setDraft(currentValue(field.id, config).toString());
-          }
-        } else if (input && !key.ctrl && !key.meta && input.length === 1) {
-          setFilterQuery((q) => q + input);
-          setCursor(0);
-        }
-        return;
-      }
-      if (input === "/") {
-        onOpenGlobalSearch?.();
-        return;
-      }
-      if (input === "f") {
-        setFilterMode(true);
-        setFilterQuery("");
-        setCursor(0);
-        return;
-      }
-      if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
-      else if (key.downArrow) setCursor((c) => Math.min(visibleFields.length - 1, c + 1));
-      else if (key.return) {
-        const field = visibleFields[cursor];
-        if (field) {
-          setEditing(true);
-          setDraft(currentValue(field.id, config).toString());
-        }
-      }
-    },
-    { isActive: active },
-  );
+  useEffect(() => {
+    if (focusRowId == null) return;
+    const j = visibleFields.findIndex((f) => f.id === focusRowId);
+    if (j >= 0) setSelectedIdx(j);
+    consumeRef.current?.();
+  }, [focusRowId, visibleFields]);
+
+  function startEdit(i: number): void {
+    const field = visibleFields[i];
+    if (!field) return;
+    setSelectedIdx(i);
+    setEditing(true);
+    setDraft(currentValue(field.id, config).toString());
+  }
 
   function commit(): void {
-    const field = visibleFields[cursor];
+    const field = visibleFields[selectedIdx];
     if (!field) return;
     const n = Number(draft.trim());
     setEditing(false);
@@ -127,50 +87,76 @@ export function ScheduleEditor({
     if (!Number.isFinite(n) || n < 1) return;
     if (field.id === "agent") {
       orchestrator.setAgentInterval(n);
-    } else {
+    } else if (field.id === "exit") {
       config.schedule.exit_monitor_interval_seconds = Math.floor(n);
       writeConfig(config);
+    } else if (field.id === "portfolio") {
+      orchestrator.setTradingCycleInterval("portfolio", n);
+    } else if (field.id === "candidate") {
+      orchestrator.setTradingCycleInterval("candidate", n);
+    } else {
+      orchestrator.setTradingCycleInterval("discovery", n);
     }
   }
 
   return (
     <Panel>
+      <Box marginBottom={1} flexDirection="row" flexWrap="wrap">
+        <Button
+          label={filterMode ? "Done filtering" : "Filter rows"}
+          icon={filterMode ? icons.close : icons.search}
+          onClick={() => {
+            if (filterMode) {
+              setFilterMode(false);
+              setFilterQuery("");
+            } else {
+              setFilterMode(true);
+              setFilterQuery("");
+            }
+          }}
+          variant="secondary"
+        />
+      </Box>
       {filterMode ? (
-        <Box marginBottom={1}>
-          <Text color={theme.color.accent}>Filter: </Text>
-          <Text color={theme.color.text}>{filterQuery.length ? filterQuery : "(type to narrow)"}</Text>
+        <Box marginBottom={1} flexDirection="row" flexWrap="wrap">
+          <Text color={theme.color.accent}>Narrow: </Text>
+          <TextInput value={filterQuery} onChange={setFilterQuery} />
         </Box>
       ) : null}
       {visibleFields.length === 0 ? (
         <Text color={theme.color.muted}>No schedule rows match this filter.</Text>
       ) : (
         visibleFields.map((field, i) => (
-          <Box key={field.id}>
-            <Text color={i === cursor ? theme.color.accent : theme.color.text}>
-              {i === cursor ? "› " : "  "}
-              {field.label.padEnd(36)}
+          <ClickableRow
+            key={field.id}
+            selected={i === selectedIdx}
+            onClick={() => {
+              if (editing) return;
+              startEdit(i);
+            }}
+          >
+            <Text>
+              <Text color={i === selectedIdx ? theme.color.accent : theme.color.text}>
+                {field.label.padEnd(36)}
+              </Text>
+              <Text> {currentValue(field.id, config)}s</Text>
             </Text>
-            <Text>{currentValue(field.id, config)}s</Text>
-          </Box>
+          </ClickableRow>
         ))
       )}
       {editing ? (
-        <Box marginTop={1}>
+        <Box marginTop={1} flexDirection="row" flexWrap="wrap">
           <Text color={theme.color.primary}>Seconds: </Text>
           <TextInput value={draft} onChange={setDraft} onSubmit={commit} />
+          <Box marginLeft={1}>
+            <Button label="Save" icon={icons.check} onClick={commit} minWidth={8} />
+          </Box>
         </Box>
       ) : (
         <Box marginTop={1} flexDirection="column">
           <Text color={theme.color.muted}>
-            {filterMode
-              ? "type filter · f exit filter · ↑/↓ · Enter edit"
-              : "↑/↓ select · Enter edit · / search all · f filter"}
+            Click a row to edit seconds. Shorter intervals burn more API quota. 60–300s is typical.
           </Text>
-          <Box marginTop={1}>
-            <Text color={theme.color.muted}>
-              Hint: shorter intervals burn more API quota. 60-300s is sane for most setups.
-            </Text>
-          </Box>
         </Box>
       )}
       <Box marginTop={1} flexDirection="column">
@@ -182,7 +168,16 @@ export function ScheduleEditor({
 }
 
 function currentValue(field: FieldId, config: Orchestrator["config"]): number {
-  return field === "agent"
-    ? config.schedule.agent_interval_seconds
-    : config.schedule.exit_monitor_interval_seconds;
+  switch (field) {
+    case "agent":
+      return config.schedule.agent_interval_seconds;
+    case "exit":
+      return config.schedule.exit_monitor_interval_seconds;
+    case "portfolio":
+      return config.schedule.portfolio_cycle_seconds;
+    case "candidate":
+      return config.schedule.candidate_cycle_seconds;
+    case "discovery":
+      return config.schedule.discovery_cycle_seconds;
+  }
 }

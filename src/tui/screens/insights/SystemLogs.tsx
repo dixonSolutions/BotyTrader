@@ -16,9 +16,11 @@ interface Props {
   scrollOffset: number;
   /** Max lines to paint (terminal performance). */
   viewportLines?: number;
+  /** Optional pager / actions rendered under the panel title. */
+  toolbar?: React.ReactNode;
 }
 
-export function SystemLogs({ logs, scrollOffset, viewportLines = 14 }: Props): React.ReactElement {
+export function SystemLogs({ logs, scrollOffset, viewportLines = 14, toolbar }: Props): React.ReactElement {
   const vp = Math.max(1, viewportLines);
   const maxOffset = Math.max(0, logs.length - vp);
   const off = Math.min(Math.max(0, scrollOffset), maxOffset);
@@ -27,6 +29,11 @@ export function SystemLogs({ logs, scrollOffset, viewportLines = 14 }: Props): R
 
   return (
     <Panel title={`System logs ${logs.length ? `${off + 1}–${hi}` : "0"} of ${logs.length}`}>
+      {toolbar ? (
+        <Box marginBottom={1} flexDirection="row" flexWrap="wrap">
+          {toolbar}
+        </Box>
+      ) : null}
       {visible.length === 0 ? (
         <Text color={theme.color.muted}>No log entries yet.</Text>
       ) : (

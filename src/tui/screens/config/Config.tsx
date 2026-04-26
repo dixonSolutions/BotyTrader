@@ -1,38 +1,34 @@
 /**
  * Config container — sub-tabbed editor for everything writable.
- *
- * Tabs (limited to 3 to respect Hick's Law):
- *   - Settings : config.toml fields (broker, watchlist, risk, models, features, autotrade)
- *   - Secrets  : .env credentials (masked)
- *   - Schedule : cycle interval (writes config.toml + reschedules in place)
- *
- * Search:
- *   - `/` — search across all tabs; pick a row to jump there
- *   - `f` — in any tab, filter rows within that tab (see each editor footer)
+ * Tabs: Settings · Trading · Models (FinBERT) · Secrets · Schedule. Global search is pointer-driven.
  */
 
-import React, { useEffect, useMemo, useState } from "react";
-import { Box, Text, useInput } from "ink";
+import React, { useMemo, useState } from "react";
+import { Box, Text } from "ink";
+import TextInput from "../../components/SafeTextInput.js";
 
+import { Button } from "../../components/Button.js";
 import { Footer, Header, ScreenFrame } from "../../components/Layout.js";
+import { ScrollRegion } from "../../components/ScrollRegion.js";
+import { TabBarClickable, type TabItem } from "../../components/TabBarClickable.js";
+import { icons } from "../../components/icons.js";
 import { theme } from "../../theme.js";
 import { SecretsEditor } from "./SecretsEditor.js";
 import { SettingsEditor } from "./SettingsEditor.js";
 import { ScheduleEditor } from "./ScheduleEditor.js";
+import { TradingEditor } from "./TradingEditor.js";
+import { FinbertModelsEditor } from "./FinbertModelsEditor.js";
 import type { Orchestrator, OrchestratorState } from "../../../orchestrator.js";
-import {
-  buildConfigSearchHits,
-  hitHaystack,
-  matchesConfigFilter,
-  type ConfigTabId,
-} from "./configSearchIndex.js";
+import { buildConfigSearchHits, hitHaystack, matchesConfigFilter, type ConfigTabId } from "./configSearchIndex.js";
 
 type ConfigTab = ConfigTabId;
 
-const TABS: { id: ConfigTab; label: string; key: string }[] = [
-  { id: "settings", label: "Settings", key: "1" },
-  { id: "secrets", label: "Secrets", key: "2" },
-  { id: "schedule", label: "Schedule", key: "3" },
+const TABS: readonly TabItem<ConfigTab>[] = [
+  { id: "settings", label: "Settings", icon: icons.bullet },
+  { id: "trading", label: "Trading", icon: icons.bullet },
+  { id: "models", label: "Models", icon: icons.bullet },
+  { id: "secrets", label: "Secrets", icon: icons.bullet },
+  { id: "schedule", label: "Schedule", icon: icons.bullet },
 ];
 
 interface Props {
@@ -45,7 +41,6 @@ export function Config({ orchestrator, state, onBack }: Props): React.ReactEleme
   const [tab, setTab] = useState<ConfigTab>("settings");
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [globalQuery, setGlobalQuery] = useState("");
-  const [globalResultIndex, setGlobalResultIndex] = useState(0);
   const [focusRowId, setFocusRowId] = useState<string | null>(null);
 
   const allHits = useMemo(() => buildConfigSearchHits(orchestrator), [orchestrator]);
@@ -54,147 +49,127 @@ export function Config({ orchestrator, state, onBack }: Props): React.ReactEleme
     [allHits, globalQuery],
   );
 
-  useEffect(() => {
-    setGlobalResultIndex((i) => Math.min(i, Math.max(0, filteredHits.length - 1)));
-  }, [filteredHits.length]);
-
-  useInput(
-    (input, key) => {
-      if (!globalSearchOpen) return;
-      if (key.escape) {
-        setGlobalSearchOpen(false);
-        setGlobalQuery("");
-        setGlobalResultIndex(0);
-        return;
-      }
-      if (key.upArrow) {
-        setGlobalResultIndex((i) => Math.max(0, i - 1));
-        return;
-      }
-      if (key.downArrow) {
-        setGlobalResultIndex((i) => Math.min(Math.max(0, filteredHits.length - 1), i + 1));
-        return;
-      }
-      if (key.return) {
-        const hit = filteredHits[globalResultIndex];
-        if (hit) {
-          setTab(hit.tab);
-          setFocusRowId(hit.rowId);
-        }
-        setGlobalSearchOpen(false);
-        setGlobalQuery("");
-        setGlobalResultIndex(0);
-        return;
-      }
-      if (key.backspace || key.delete) {
-        setGlobalQuery((q) => q.slice(0, -1));
-        setGlobalResultIndex(0);
-        return;
-      }
-      if (input && !key.ctrl && !key.meta && input.length === 1) {
-        setGlobalQuery((q) => q + input);
-        setGlobalResultIndex(0);
-      }
-    },
-    { isActive: globalSearchOpen },
-  );
-
-  useInput(
-    (input, key) => {
-      if (globalSearchOpen) return;
-      if (key.escape || input === "h") {
-        onBack();
-        return;
-      }
-      const match = TABS.find((t) => t.key === input);
-      if (match) setTab(match.id);
-    },
-    { isActive: !globalSearchOpen },
-  );
-
   const editorActive = (t: ConfigTab) => tab === t && !globalSearchOpen;
 
+  function openSearch(): void {
+    setGlobalSearchOpen(true);
+    setGlobalQuery("");
+  }
+
+  function closeSearch(): void {
+    setGlobalSearchOpen(false);
+    setGlobalQuery("");
+  }
+
+  function jumpToHit(h: (typeof allHits)[number]): void {
+    setTab(h.tab);
+    setFocusRowId(h.rowId);
+    closeSearch();
+  }
+
   return (
-    <Box flexDirection="column">
-      <Header
-        breadcrumb={["Config", labelFor(tab)]}
-        brokerName={state.brokerName}
-        connected={state.connected}
-      />
-      <ScreenFrame
-        title="Config"
-        subtitle="Edit settings, secrets, and the cycle schedule. Changes persist to config.toml / .env."
-      >
-        <TabBar current={tab} />
-        {globalSearchOpen ? (
-          <GlobalSearchView
-            query={globalQuery}
-            hits={filteredHits}
-            selectedIndex={globalResultIndex}
+    <Box flexDirection="column" flexGrow={1} minHeight={0}>
+      <Box flexShrink={0}>
+        <Header
+          breadcrumb={["Config", labelFor(tab)]}
+          brokerName={state.brokerName}
+          connected={state.connected}
+          onBack={onBack}
+        />
+      </Box>
+      <ScrollRegion>
+        <ScreenFrame
+          title="Config"
+          subtitle="Settings, trading, FinBERT (Models tab), secrets, and schedules — persisted to config.toml / .env."
+        >
+        <Box marginBottom={1} flexDirection="row" flexWrap="wrap">
+          <Button
+            label={globalSearchOpen ? "Close search" : "Search all tabs"}
+            icon={globalSearchOpen ? icons.close : icons.search}
+            onClick={globalSearchOpen ? closeSearch : openSearch}
+            variant="secondary"
+            minWidth={16}
           />
-        ) : (
-          <>
-            {tab === "settings" ? (
-              <SettingsEditor
-                orchestrator={orchestrator}
-                active={editorActive("settings")}
-                focusRowId={tab === "settings" ? focusRowId : null}
-                onFocusRowConsumed={() => setFocusRowId(null)}
-                onOpenGlobalSearch={() => {
-                  setGlobalSearchOpen(true);
-                  setGlobalQuery("");
-                  setGlobalResultIndex(0);
-                }}
-              />
-            ) : null}
-            {tab === "secrets" ? (
-              <SecretsEditor
-                orchestrator={orchestrator}
-                active={editorActive("secrets")}
-                focusRowId={tab === "secrets" ? focusRowId : null}
-                onFocusRowConsumed={() => setFocusRowId(null)}
-                onOpenGlobalSearch={() => {
-                  setGlobalSearchOpen(true);
-                  setGlobalQuery("");
-                  setGlobalResultIndex(0);
-                }}
-              />
-            ) : null}
-            {tab === "schedule" ? (
-              <ScheduleEditor
-                orchestrator={orchestrator}
-                active={editorActive("schedule")}
-                focusRowId={tab === "schedule" ? focusRowId : null}
-                onFocusRowConsumed={() => setFocusRowId(null)}
-                onOpenGlobalSearch={() => {
-                  setGlobalSearchOpen(true);
-                  setGlobalQuery("");
-                  setGlobalResultIndex(0);
-                }}
-              />
-            ) : null}
-          </>
-        )}
-      </ScreenFrame>
-      <Footer
-        hints={
-          globalSearchOpen
-            ? ["type to filter", "↑↓ pick", "Enter jump", "Esc close"]
-            : ["/ search all", "f filter tab", "1 settings", "2 secrets", "3 schedule", "h home", "Esc back"]
-        }
-      />
+        </Box>
+        <TabBarClickable tabs={TABS} current={tab} onSelect={setTab} />
+        {globalSearchOpen ? (
+          <GlobalSearchOverlay
+            query={globalQuery}
+            onQueryChange={setGlobalQuery}
+            hits={filteredHits}
+            onPick={jumpToHit}
+            onClose={closeSearch}
+          />
+        ) : null}
+        {!globalSearchOpen && tab === "settings" ? (
+          <SettingsEditor
+            orchestrator={orchestrator}
+            active={editorActive("settings")}
+            focusRowId={tab === "settings" ? focusRowId : null}
+            onFocusRowConsumed={() => setFocusRowId(null)}
+          />
+        ) : null}
+        {!globalSearchOpen && tab === "trading" ? (
+          <TradingEditor
+            orchestrator={orchestrator}
+            active={editorActive("trading")}
+            focusRowId={tab === "trading" ? focusRowId : null}
+            onFocusRowConsumed={() => setFocusRowId(null)}
+          />
+        ) : null}
+        {!globalSearchOpen && tab === "models" ? (
+          <FinbertModelsEditor
+            orchestrator={orchestrator}
+            trading={state.trading}
+            active={editorActive("models")}
+            focusRowId={tab === "models" ? focusRowId : null}
+            onFocusRowConsumed={() => setFocusRowId(null)}
+          />
+        ) : null}
+        {!globalSearchOpen && tab === "secrets" ? (
+          <SecretsEditor
+            orchestrator={orchestrator}
+            active={editorActive("secrets")}
+            focusRowId={tab === "secrets" ? focusRowId : null}
+            onFocusRowConsumed={() => setFocusRowId(null)}
+          />
+        ) : null}
+        {!globalSearchOpen && tab === "schedule" ? (
+          <ScheduleEditor
+            orchestrator={orchestrator}
+            active={editorActive("schedule")}
+            focusRowId={tab === "schedule" ? focusRowId : null}
+            onFocusRowConsumed={() => setFocusRowId(null)}
+          />
+        ) : null}
+        </ScreenFrame>
+      </ScrollRegion>
+      <Box flexShrink={0}>
+        <Footer
+          hints={[
+            "Tabs: click pill labels",
+            globalSearchOpen ? "Type in search field, click a result or Close" : "Search all opens cross-tab search",
+            "Wheel scrolls the main pane when content is tall",
+            "Back (top row) returns Home",
+          ]}
+        />
+      </Box>
     </Box>
   );
 }
 
-function GlobalSearchView({
+function GlobalSearchOverlay({
   query,
+  onQueryChange,
   hits,
-  selectedIndex,
+  onPick,
+  onClose,
 }: {
   query: string;
+  onQueryChange: (q: string) => void;
   hits: ReturnType<typeof buildConfigSearchHits>;
-  selectedIndex: number;
+  onPick: (h: ReturnType<typeof buildConfigSearchHits>[number]) => void;
+  onClose: () => void;
 }): React.ReactElement {
   const maxLines = 10;
   const slice = hits.slice(0, maxLines);
@@ -203,23 +178,36 @@ function GlobalSearchView({
       <Text bold color={theme.color.primary}>
         Search all tabs
       </Text>
+      <Box marginTop={1} flexDirection="row" flexWrap="wrap">
+        <Text color={theme.color.muted}>Query: </Text>
+        <TextInput value={query} onChange={onQueryChange} />
+        <Box marginLeft={1}>
+          <Button label="Close" icon={icons.close} onClick={onClose} variant="ghost" />
+        </Box>
+      </Box>
       <Text color={theme.color.muted}>
-        Query: {query.length === 0 ? "(empty shows all)" : query}
-        {query.length > 0 && hits.length === 0 ? " — no matches" : null}
+        {query.length > 0 && hits.length === 0 ? "No matches" : "Empty query shows the first results — narrow by typing."}
       </Text>
       <Box marginTop={1} flexDirection="column">
-        {slice.map((h, i) => {
-          const sel = i === selectedIndex;
-          const tabLabel = h.tab === "settings" ? "Settings" : h.tab === "secrets" ? "Secrets" : "Schedule";
+        {slice.map((h) => {
+          const tabLabel =
+            h.tab === "settings"
+              ? "Settings"
+              : h.tab === "trading"
+                ? "Trading"
+                : h.tab === "models"
+                  ? "Models"
+                  : h.tab === "secrets"
+                    ? "Secrets"
+                    : "Schedule";
           return (
-            <Box key={`${h.tab}-${h.rowId}`} flexDirection="column">
-              <Text color={sel ? theme.color.accent : theme.color.text} bold={sel}>
-                {sel ? "› " : "  "}
-                {tabLabel} › {h.title}
-              </Text>
-              {h.subtitle ? (
-                <Text color={theme.color.muted}>{"    " + truncate(h.subtitle, 72)}</Text>
-              ) : null}
+            <Box key={`${h.tab}-${h.rowId}`} marginBottom={1} flexDirection="row" flexWrap="wrap">
+              <Button
+                label={`${tabLabel} — ${h.title}`}
+                onClick={() => onPick(h)}
+                variant="secondary"
+                minWidth={24}
+              />
             </Box>
           );
         })}
@@ -231,29 +219,6 @@ function GlobalSearchView({
   );
 }
 
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1) + "…";
-}
-
-function TabBar({ current }: { current: ConfigTab }): React.ReactElement {
-  return (
-    <Box marginBottom={1}>
-      {TABS.map((t, i) => {
-        const active = t.id === current;
-        return (
-          <Box key={t.id} marginRight={i === TABS.length - 1 ? 0 : 2}>
-            <Text color={theme.color.muted}>[{t.key}] </Text>
-            <Text bold={active} color={active ? theme.color.accent : theme.color.text}>
-              {t.label}
-            </Text>
-          </Box>
-        );
-      })}
-    </Box>
-  );
-}
-
-function labelFor(tab: ConfigTab): string {
-  return TABS.find((t) => t.id === tab)?.label ?? "";
+function labelFor(t: ConfigTab): string {
+  return TABS.find((x) => x.id === t)?.label ?? "";
 }

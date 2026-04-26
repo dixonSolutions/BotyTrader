@@ -1,5 +1,5 @@
 /**
- * Agent loop — ONE cycle of RAG → local HF model (ReAct) → decision JSON.
+ * Agent loop — ONE cycle of RAG → local or HF Inference API LLM (ReAct) → decision JSON.
  *
  * Architecture (matches the docs/agent-cycle.md description):
  *
@@ -16,7 +16,7 @@
 
 import { DecisionSchema, type Decision } from "../actions/types.js";
 import type { Config, Secrets } from "../config.js";
-import { generateChat, type ChatMessage } from "../llm/local_model.js";
+import { generateAgentTurn, type ChatMessage } from "../llm/inference.js";
 import type { WorkingMemoryStore } from "../memory/disabled_store.js";
 import { callTool } from "../mcp/server.js";
 import { toolsForRuntime } from "../mcp/tools/index.js";
@@ -72,11 +72,19 @@ export async function runCycle(opts: RunCycleOptions): Promise<CycleResult> {
     .map((t) => `- ${t.name}: ${t.description}\n    args schema: ${JSON.stringify(t.inputSchema)}`)
     .join("\n");
 
+  const sw = config.agent.sentiment_weight;
+  const techPct = (1 - sw) * 100;
+  const sentPct = sw * 100;
+  const blendLine =
+    `Signal blend (user-tuned): treat quantitative technical evidence with ~${techPct.toFixed(0)}% weight ` +
+    `and qualitative sentiment / news context with ~${sentPct.toFixed(0)}% weight when they conflict. ` +
+    `Briefly say which stream you favour in Thought before Final.`;
+
   const messages: ChatMessage[] = [
     { role: "system", content: config.agent.system_prompt },
     {
       role: "system",
-      content: `Available tools:\n${toolCatalogue}\n\nWatchlist: ${config.watchlist.symbols.join(", ")}\nFocus symbol: ${symbol}\nAutotrade: ${config.autotrade.enabled}\nMin confidence to trade: ${config.risk.min_confidence_to_trade}\n\n--- Retrieved memories ---\n${ragBlock}`,
+      content: `Available tools:\n${toolCatalogue}\n\nWatchlist: ${config.watchlist.symbols.join(", ")}\nFocus symbol: ${symbol}\nAutotrade: ${config.autotrade.enabled}\nMin confidence to trade: ${config.risk.min_confidence_to_trade}\n${blendLine}\n\n--- Retrieved memories ---\n${ragBlock}`,
     },
     { role: "user", content: `Run one trading cycle for ${symbol} now. Begin with Thought:` },
   ];
@@ -84,7 +92,7 @@ export async function runCycle(opts: RunCycleOptions): Promise<CycleResult> {
   const toolCalls: CycleResult["toolCalls"] = [];
 
   for (let i = 0; i < maxIterations; i++) {
-    const text = await generateChat(config, messages, {
+    const text = await generateAgentTurn(config, secrets, messages, {
       // Stop as soon as the model starts a fresh "user" turn or proposes a
       // second action — keeps the trace tight and predictable.
       stop: ["\nObservation:", "\nUser:", "\nuser:"],

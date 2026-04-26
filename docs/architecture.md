@@ -7,9 +7,9 @@ High-level design for **BotyTrader**: TUI → Orchestrator → Agent Loop + Exec
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        TUI (Ink)                             │
-│  [Dashboard] [Watchlist] [Agent Log] [Memory] [Config]       │
+│  [Home] [Insights] [Config] (+ Setup)                          │
 └─────────────┬───────────────────────────────────────────────┘
-              │ renders state, receives commands
+              │ renders state, receives pointer/text intents
 ┌─────────────▼───────────────────────────────────────────────┐
 │                      Orchestrator                            │
 │  - manages watchlist symbols                                 │
@@ -48,13 +48,13 @@ High-level design for **BotyTrader**: TUI → Orchestrator → Agent Loop + Exec
 | Role | Purpose | Choice |
 |------|---------|--------|
 | **Embedding model** | Turn text into vectors for storage and retrieval | Gemini Embedding API — e.g. `text-embedding-004` (requires `GEMINI_API_KEY`) |
-| **LLM** | Reason over retrieved context + tool results | Local Hugging Face model via `@huggingface/transformers` (no API key) |
+| **LLM** | Reason over retrieved context + tool results | Local `@huggingface/transformers` and/or Hugging Face Inference API (`@huggingface/inference`; `HF_TOKEN` when remote) |
 
 ## Component responsibilities
 
 | Component | Responsibility |
 |-----------|----------------|
-| **TUI** | Render orchestrator/agent/memory state; send user commands (config, manual triggers). |
+| **TUI** | Render orchestrator/agent/memory state; send user intents (clicks, text fields) for config, models, and manual triggers. |
 | **Orchestrator** | Watchlist; schedule agent cycles; open MCP/LLM session; apply **post-decision** actions (orders, memory sync). |
 | **Agent loop** | RAG-backed system prompt; call MCP tools during reasoning; emit **structured decision JSON** (not a tool). |
 | **Executor / broker** | Submit orders via the selected **broker adapter** (paper or live as configured). |

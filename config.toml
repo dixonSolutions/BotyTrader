@@ -2,15 +2,11 @@
 embedding_model = "text-embedding-004"
 
 [model]
-# Active local Hugging Face model id. Manage installs from the Models screen (m from Home).
+provider = "local"
 id = ""
-# Quantisation. q4 is fastest on CPU; auto = library default.
 dtype = "q4"
-# Inference device. auto = library default (WebGPU when available, otherwise CPU).
 device = "auto"
-# Hard cap on completion tokens per ReAct turn.
 max_new_tokens = 512
-# Where pulled model files live (relative to the project root).
 cache_dir = ".cache/models"
 
 [huggingface]
@@ -21,9 +17,33 @@ region = "us-east-1"
 [broker]
 platform = "alpaca_paper"
 
+[trading]
+enabled = true
+mode = "paper"
+database_path = "~/.config/trading-cli/trades.db"
+
+[strategy.simple]
+enabled = true
+technical_weight = 0.6
+sentiment_weight = 0.4
+buy_threshold = 0.5
+sell_threshold = -0.3
+sma_fast_period = 20
+sma_slow_period = 50
+rsi_period = 14
+sma_neutral_band = 0.001
+
+[sentiment]
+provider = "local_finbert"
+model_id = "ProsusAI/finbert"
+cache_ttl_hours = 24
+
 [schedule]
 agent_interval_seconds = 300
 exit_monitor_interval_seconds = 30
+portfolio_cycle_seconds = 300
+candidate_cycle_seconds = 1_800
+discovery_cycle_seconds = 14_400
 
 [risk]
 max_position_pct = 10
@@ -42,7 +62,6 @@ memory_enabled = false
 web_search_enabled = false
 
 [agent]
-max_iterations = 8
 system_prompt = """
 You are BotyTrader, a disciplined trading assistant running locally.
 You operate in a strict ReAct loop. On each turn produce EXACTLY ONE of:
@@ -59,3 +78,5 @@ Rules:
 - Action arguments MUST be valid JSON on a single line.
 - Do not invent fields. Do not output prose around Final.
 - Prefer hold with low confidence when data is missing."""
+max_iterations = 8
+sentiment_weight = 0.35

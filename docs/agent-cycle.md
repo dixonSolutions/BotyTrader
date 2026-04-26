@@ -63,7 +63,7 @@ The agent **must not** directly submit orders or push to Hugging Face as unrestr
 
 1. **Pull memory from HF** — Startup only (or on interval): sync local LanceDB / dataset with remote repo if configured.
 2. **RAG:** Embed current context → retrieve top-5 (or k) memories → build system prompt with injected memories.
-3. **Build the local ReAct prompt** with the active Hugging Face model (`@huggingface/transformers`) and the registered MCP tool catalogue.
+3. **Build the ReAct prompt** with the active Hugging Face model id — either a **local** `@huggingface/transformers` pipeline or the **Inference API** (`@huggingface/inference`, see `generateAgentTurn` in `src/llm/inference.ts`) — plus the MCP tool catalogue and a **sentiment vs technical blend** line derived from `agent.sentiment_weight`.
 4. **ReAct reasoning loop:** model emits `Thought` / `Action: tool(args)`, the orchestrator dispatches the tool in-process, feeds the result back as the next `Observation`, and repeats until the model emits `Final: { ... }`.
 5. **Parse decision** — Validate schema and policy.
 6. **If autoTrade:** `broker.submitOrder(...)` via adapter.

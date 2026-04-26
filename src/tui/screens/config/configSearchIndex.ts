@@ -5,7 +5,7 @@
 import { SECRET_DESCRIPTIONS, SecretsSchema, BrokerPlatformSchema } from "../../../config.js";
 import type { Orchestrator } from "../../../orchestrator.js";
 
-export type ConfigTabId = "settings" | "secrets" | "schedule";
+export type ConfigTabId = "settings" | "trading" | "models" | "secrets" | "schedule";
 
 export interface ConfigSearchHit {
   tab: ConfigTabId;
@@ -68,6 +68,27 @@ function settingsHits(config: Orchestrator["config"]): ConfigSearchHit[] {
   }));
 }
 
+function tradingHits(config: Orchestrator["config"]): ConfigSearchHit[] {
+  const s = config.strategy.simple;
+  const rows: { rowId: string; label: string; valueHint: string }[] = [
+    { rowId: "trading_enabled", label: "Trading engine", valueHint: String(config.trading.enabled) },
+    { rowId: "trading_mode", label: "Paper / live (Alpaca)", valueHint: config.trading.mode },
+    { rowId: "db_path", label: "SQLite database path", valueHint: config.trading.database_path },
+    { rowId: "simple_enabled", label: "Simple strategy", valueHint: String(s.enabled) },
+    { rowId: "tech_w", label: "Technical weight", valueHint: String(s.technical_weight) },
+    { rowId: "sent_w", label: "Sentiment weight", valueHint: String(s.sentiment_weight) },
+    { rowId: "buy_th", label: "Buy threshold", valueHint: String(s.buy_threshold) },
+    { rowId: "sell_th", label: "Sell threshold", valueHint: String(s.sell_threshold) },
+    { rowId: "sent_provider", label: "Sentiment provider", valueHint: config.sentiment.provider },
+  ];
+  return rows.map((r) => ({
+    tab: "trading" as const,
+    rowId: r.rowId,
+    title: r.label,
+    subtitle: `Current: ${r.valueHint}`,
+  }));
+}
+
 function secretsHits(): ConfigSearchHit[] {
   const keys = Object.keys(SecretsSchema.shape) as (keyof typeof SECRET_DESCRIPTIONS)[];
   return keys.map((k) => ({
@@ -76,6 +97,23 @@ function secretsHits(): ConfigSearchHit[] {
     title: k,
     subtitle: SECRET_DESCRIPTIONS[k],
   }));
+}
+
+function modelsHits(config: Orchestrator["config"]): ConfigSearchHit[] {
+  return [
+    {
+      tab: "models",
+      rowId: "finbert_official",
+      title: "FinBERT (ProsusAI/finbert)",
+      subtitle: `Provider: ${config.sentiment.provider} · Repo: ${config.sentiment.model_id}`,
+    },
+    {
+      tab: "models",
+      rowId: "agent_blend",
+      title: "Agent ReAct: sentiment vs technical blend",
+      subtitle: `Current weight: ${config.agent.sentiment_weight}`,
+    },
+  ];
 }
 
 function scheduleHits(config: Orchestrator["config"]): ConfigSearchHit[] {
@@ -92,12 +130,32 @@ function scheduleHits(config: Orchestrator["config"]): ConfigSearchHit[] {
       title: "Exit monitor interval (seconds)",
       subtitle: `Current: ${config.schedule.exit_monitor_interval_seconds}s`,
     },
+    {
+      tab: "schedule" as const,
+      rowId: "portfolio",
+      title: "Portfolio trading cycle (seconds)",
+      subtitle: `Current: ${config.schedule.portfolio_cycle_seconds}s`,
+    },
+    {
+      tab: "schedule" as const,
+      rowId: "candidate",
+      title: "Candidate / watchlist cycle (seconds)",
+      subtitle: `Current: ${config.schedule.candidate_cycle_seconds}s`,
+    },
+    {
+      tab: "schedule" as const,
+      rowId: "discovery",
+      title: "Discovery cycle (seconds)",
+      subtitle: `Current: ${config.schedule.discovery_cycle_seconds}s`,
+    },
   ];
 }
 
 export function buildConfigSearchHits(orchestrator: Orchestrator): ConfigSearchHit[] {
   return [
     ...settingsHits(orchestrator.config),
+    ...tradingHits(orchestrator.config),
+    ...modelsHits(orchestrator.config),
     ...secretsHits(),
     ...scheduleHits(orchestrator.config),
   ];

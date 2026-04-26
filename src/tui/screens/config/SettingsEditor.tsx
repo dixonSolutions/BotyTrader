@@ -1,20 +1,16 @@
 /**
  * Settings editor — non-secret config.toml fields.
- *
- * Field types we support inline:
- *   - boolean : Enter toggles
- *   - enum    : Enter cycles to next option
- *   - number  : Enter opens a TextInput; submit writes back
- *   - list    : Enter opens a TextInput accepting comma-separated values
- *
- * `/` opens global search (all tabs). `f` toggles in-tab filter.
+ * Pointer: click a row to toggle / cycle / open editor; filter via toolbar.
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Box, Text, useInput } from "ink";
-import TextInput from "ink-text-input";
+import { Box, Text } from "ink";
+import TextInput from "../../components/SafeTextInput.js";
 
+import { Button } from "../../components/Button.js";
+import { ClickableRow } from "../../components/ClickableRow.js";
 import { Panel } from "../../components/Layout.js";
+import { icons } from "../../components/icons.js";
 import { theme } from "../../theme.js";
 import {
   writeConfig,
@@ -39,29 +35,9 @@ interface Props {
   active: boolean;
   focusRowId?: string | null;
   onFocusRowConsumed?: () => void;
-  onOpenGlobalSearch?: () => void;
 }
 
 const BROKER_OPTIONS = BrokerPlatformSchema.options;
-
-/** Order must match `buildFields` row order (for jump-to from global search). */
-const SETTINGS_FIELD_IDS: readonly string[] = [
-  "autotrade",
-  "memory_enabled",
-  "web_search_enabled",
-  "broker",
-  "watchlist",
-  "max_position_pct",
-  "min_confidence_to_trade",
-  "stop_loss_pct",
-  "take_profit_pct",
-  "embedding_model",
-  "active_model",
-  "model_dtype",
-  "model_device",
-  "max_new_tokens",
-  "hf_bucket",
-];
 
 function buildFields(config: Orchestrator["config"]): Field[] {
   return [
@@ -105,7 +81,7 @@ function buildFields(config: Orchestrator["config"]): Field[] {
       id: "active_model",
       label: "Active local model",
       kind: "list",
-      value: config.model.id || "(none — open Models screen)",
+      value: config.model.id || "(none — enter a Hugging Face org/repo id)",
     },
     {
       id: "model_dtype",
@@ -136,17 +112,18 @@ export function SettingsEditor({
   active,
   focusRowId,
   onFocusRowConsumed,
-  onOpenGlobalSearch,
 }: Props): React.ReactElement {
   const { config } = orchestrator;
   const fields = buildFields(config);
-  const [cursor, setCursor] = useState(0);
+  const [selectedVisibleIdx, setSelectedVisibleIdx] = useState(0);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [filterMode, setFilterMode] = useState(false);
   const [filterQuery, setFilterQuery] = useState("");
   const consumeRef = useRef(onFocusRowConsumed);
   consumeRef.current = onFocusRowConsumed;
+  void active;
+  // `active` reserved for parent (focus isolation); all interaction is pointer-based here.
 
   const visible = useMemo(() => {
     const q = filterQuery.trim().toLowerCase();
@@ -163,58 +140,16 @@ export function SettingsEditor({
     if (focusRowId == null) return;
     setFilterMode(false);
     setFilterQuery("");
-    const idx = SETTINGS_FIELD_IDS.indexOf(focusRowId);
-    if (idx >= 0) setCursor(idx);
-    consumeRef.current?.();
   }, [focusRowId]);
 
-  useInput(
-    (input, key) => {
-      if (editing) return;
-      if (filterMode) {
-        if (input === "f") {
-          setFilterMode(false);
-          setFilterQuery("");
-          setCursor(0);
-          return;
-        }
-        if (key.backspace || key.delete) {
-          setFilterQuery((q) => q.slice(0, -1));
-          setCursor(0);
-          return;
-        }
-        if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
-        else if (key.downArrow) setCursor((c) => Math.min(visible.length - 1, c + 1));
-        else if (key.return) {
-          const row = visible[cursor]?.f;
-          if (row) handleEnter(row);
-        } else if (input && !key.ctrl && !key.meta && input.length === 1) {
-          setFilterQuery((q) => q + input);
-          setCursor(0);
-        }
-        return;
-      }
-      if (input === "/") {
-        onOpenGlobalSearch?.();
-        return;
-      }
-      if (input === "f") {
-        setFilterMode(true);
-        setFilterQuery("");
-        setCursor(0);
-        return;
-      }
-      if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
-      else if (key.downArrow) setCursor((c) => Math.min(visible.length - 1, c + 1));
-      else if (key.return) {
-        const row = visible[cursor]?.f;
-        if (row) handleEnter(row);
-      }
-    },
-    { isActive: active },
-  );
+  useEffect(() => {
+    if (focusRowId == null) return;
+    const j = visible.findIndex((v) => v.f.id === focusRowId);
+    if (j >= 0) setSelectedVisibleIdx(j);
+    consumeRef.current?.();
+  }, [focusRowId, visible]);
 
-  function handleEnter(field: Field): void {
+  function handleActivate(field: Field): void {
     if (field.kind === "bool") {
       if (field.id === "autotrade") {
         orchestrator.setAutotrade(!config.autotrade.enabled);
@@ -241,82 +176,112 @@ export function SettingsEditor({
   }
 
   function commit(): void {
-    const field = visible[cursor]?.f;
+    const field = visible[selectedVisibleIdx]?.f;
     if (!field) return;
     const raw = draft.trim();
     setEditing(false);
     setDraft("");
-    if (!raw) return;
 
     switch (field.id) {
       case "watchlist":
-        orchestrator.setWatchlist(raw.split(/[\s,]+/));
+        if (raw) orchestrator.setWatchlist(raw.split(/[\s,]+/));
         break;
       case "max_position_pct":
       case "min_confidence_to_trade":
       case "stop_loss_pct":
       case "take_profit_pct": {
         const n = Number(raw);
-        if (Number.isFinite(n)) orchestrator.setRiskField(field.id, n);
+        if (raw && Number.isFinite(n)) orchestrator.setRiskField(field.id, n);
         break;
       }
       case "embedding_model":
-        config.gemini.embedding_model = raw;
-        writeConfig(config);
+        if (raw) {
+          config.gemini.embedding_model = raw;
+          writeConfig(config);
+        }
         break;
       case "active_model":
-        // Manual override path — preferred flow is the dedicated Models screen,
-        // but power-users may want to type a repo id directly.
-        config.model.id = raw;
-        writeConfig(config);
+        if (raw) {
+          config.model.id = raw;
+          writeConfig(config);
+        }
         break;
       case "max_new_tokens": {
         const n = Math.floor(Number(raw));
-        if (Number.isFinite(n) && n > 0) {
+        if (raw && Number.isFinite(n) && n > 0) {
           config.model.max_new_tokens = n;
           writeConfig(config);
         }
         break;
       }
       case "hf_bucket":
-        config.huggingface.bucket_name = raw;
-        writeConfig(config);
+        if (raw) {
+          config.huggingface.bucket_name = raw;
+          writeConfig(config);
+        }
         break;
     }
   }
 
   return (
     <Panel>
+      <Box marginBottom={1} flexDirection="row" flexWrap="wrap">
+        <Button
+          label={filterMode ? "Done filtering" : "Filter rows"}
+          icon={filterMode ? icons.close : icons.search}
+          onClick={() => {
+            if (filterMode) {
+              setFilterMode(false);
+              setFilterQuery("");
+            } else {
+              setFilterMode(true);
+              setFilterQuery("");
+            }
+          }}
+          variant="secondary"
+        />
+      </Box>
       {filterMode ? (
-        <Box marginBottom={1}>
-          <Text color={theme.color.accent}>Filter: </Text>
-          <Text color={theme.color.text}>{filterQuery.length ? filterQuery : "(type to narrow)"}</Text>
+        <Box marginBottom={1} flexDirection="row" flexWrap="wrap">
+          <Text color={theme.color.accent}>Narrow: </Text>
+          <TextInput value={filterQuery} onChange={setFilterQuery} />
         </Box>
       ) : null}
       {visible.length === 0 ? (
         <Text color={theme.color.muted}>No rows match this filter.</Text>
       ) : (
         visible.map(({ f: field }, i) => (
-          <Box key={field.id}>
-            <Text color={i === cursor ? theme.color.accent : theme.color.text}>
-              {i === cursor ? "› " : "  "}
-              {field.label.padEnd(34)}
+          <ClickableRow
+            key={field.id}
+            selected={i === selectedVisibleIdx}
+            onClick={() => {
+              if (editing) return;
+              setSelectedVisibleIdx(i);
+              handleActivate(field);
+            }}
+          >
+            <Text>
+              <Text color={i === selectedVisibleIdx ? theme.color.accent : theme.color.text}>
+                {field.label.padEnd(36)}
+              </Text>
+              <Text color={valueColor(field)}> {displayValue(field)}</Text>
             </Text>
-            <Text color={valueColor(field)}>{displayValue(field)}</Text>
-          </Box>
+          </ClickableRow>
         ))
       )}
       {editing ? (
-        <Box marginTop={1}>
+        <Box marginTop={1} flexDirection="row" flexWrap="wrap">
           <Text color={theme.color.primary}>New value: </Text>
           <TextInput value={draft} onChange={setDraft} onSubmit={commit} />
+          <Box marginLeft={1}>
+            <Button label="Save" icon={icons.check} onClick={commit} minWidth={8} />
+          </Box>
         </Box>
       ) : (
         <Box marginTop={1} flexDirection="column">
           <Text color={theme.color.muted}>
-            {filterMode
-              ? "type filter · f exit filter · ↑/↓ · Enter edit/toggle"
-              : "↑/↓ select · Enter edit/toggle/cycle · / search all · f filter"}
+            Click a row: toggle, cycle enum, or open value editor. Use Filter to narrow. Typing in the value field
+            still uses the keyboard.
           </Text>
         </Box>
       )}
