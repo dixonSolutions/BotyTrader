@@ -1,0 +1,87 @@
+name: APT Pages
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish to the APT repository"
+        required: true
+        type: string
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish-apt-pages:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy-pages.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Resolve release tag
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${{ github.event.workflow_run.head_branch }}"
+          fi
+
+          if [[ ! "$TAG" =~ ^v[0-9] ]]; then
+            echo "Expected a version tag like v0.1.3, got: $TAG" >&2
+            exit 1
+          fi
+
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+
+      - name: Download release package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/botytrader-release"
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'botytrader_*_amd64.deb' \
+            --dir "${RUNNER_TEMP}/botytrader-release"
+
+          DEB_PATH="$(find "${RUNNER_TEMP}/botytrader-release" -maxdepth 1 -name 'botytrader_*_amd64.deb' -print -quit)"
+          if [[ -z "$DEB_PATH" ]]; then
+            echo "No botytrader amd64 .deb asset found on release ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+
+          echo "DEB_PATH=$DEB_PATH" >> "$GITHUB_ENV"
+
+      - name: Build APT Pages artifact
+        env:
+          APT_GPG_PRIVATE_KEY_NEW: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          APT_GPG_PRIVATE_KEY_LEGACY: ${{ secrets.GPG_PRIVATE_KEY }}
+          PAGES_ROOT: ${{ runner.temp }}/botytrader-pages
+        run: |
+          export APT_GPG_PRIVATE_KEY="${APT_GPG_PRIVATE_KEY_NEW:-${APT_GPG_PRIVATE_KEY_LEGACY:-}}"
+          bash scripts/ci-publish-apt.sh
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/botytrader-pages
+
+      - name: Deploy GitHub Pages
+        id: deploy-pages
+        uses: actions/deploy-pages@v4

@@ -106,7 +106,7 @@ if [[ -z "$PAGES_BASE_URL" ]]; then
   echo "" >&2
   echo "Fix:" >&2
   echo "  1. Settings → Pages: Source = GitHub Actions." >&2
-  echo "  2. Push a version tag (v*) so the Release workflow deploys pool/ and dists/ to Pages." >&2
+  echo "  2. Push a version tag (v*) so Release builds the .deb and APT Pages deploys pool/ and dists/." >&2
   echo "  3. Pass repo explicitly: sudo $0 ${OWNER}/${NAME}" >&2
   echo "     or full URL: sudo $0 https://github.com/${OWNER}/${NAME}" >&2
   exit 1
@@ -118,10 +118,13 @@ SOURCE_LIST="/etc/apt/sources.list.d/botytrader.list"
 mkdir -p /etc/apt/keyrings
 umask 022
 
-if ! curl -fsSL --connect-timeout 15 "${PAGES_BASE_URL}/public.asc" | gpg --dearmor -o "$KEYRING"; then
+TMP_KEYRING="$(mktemp --tmpdir botytrader-keyring.XXXXXX.gpg)"
+if ! curl -fsSL --connect-timeout 15 "${PAGES_BASE_URL}/public.asc" | gpg --batch --yes --dearmor -o "$TMP_KEYRING"; then
+  rm -f "$TMP_KEYRING"
   echo "Found APT index at ${PAGES_BASE_URL} but failed to download public.asc (same base URL)." >&2
   exit 1
 fi
+mv "$TMP_KEYRING" "$KEYRING"
 chmod 644 "$KEYRING"
 
 echo "deb [arch=amd64 signed-by=${KEYRING}] ${PAGES_BASE_URL} stable main" > "$SOURCE_LIST"

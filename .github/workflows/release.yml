@@ -9,11 +9,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy-pages.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,21 +54,3 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ env.DEB }}
-
-      - name: Build APT Pages artifact
-        env:
-          APT_GPG_PRIVATE_KEY_NEW: ${{ secrets.APT_GPG_PRIVATE_KEY }}
-          APT_GPG_PRIVATE_KEY_LEGACY: ${{ secrets.GPG_PRIVATE_KEY }}
-          PAGES_ROOT: ${{ runner.temp }}/botytrader-pages
-        run: |
-          export APT_GPG_PRIVATE_KEY="${APT_GPG_PRIVATE_KEY_NEW:-${APT_GPG_PRIVATE_KEY_LEGACY:-}}"
-          bash scripts/ci-publish-apt.sh
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ${{ runner.temp }}/botytrader-pages
-
-      - name: Deploy GitHub Pages
-        id: deploy-pages
-        uses: actions/deploy-pages@v4

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Build signed APT metadata for the GitHub Pages deployment artifact.
 # Run from a checkout after building the .deb (file may be untracked in repo root).
-# Expects: GITHUB_WORKSPACE, DEB (filename only), APT_GPG_PRIVATE_KEY (armored secret key).
+# Expects: GITHUB_WORKSPACE, DEB or DEB_PATH, APT_GPG_PRIVATE_KEY (armored secret key).
 # Optional: PAGES_ROOT (defaults to docs/ for local testing).
 set -euo pipefail
 
-if [[ -z "${DEB:-}" ]]; then
-  echo "ci-publish-apt: DEB env must be set to the .deb filename" >&2
+if [[ -z "${DEB:-}" && -z "${DEB_PATH:-}" ]]; then
+  echo "ci-publish-apt: DEB or DEB_PATH env must be set to the .deb package" >&2
   exit 1
 fi
 
@@ -15,7 +15,10 @@ if [[ -z "${APT_GPG_PRIVATE_KEY:-}" ]]; then
   exit 1
 fi
 
-DEB_PATH="${GITHUB_WORKSPACE}/${DEB}"
+if [[ -z "${DEB_PATH:-}" ]]; then
+  DEB_PATH="${GITHUB_WORKSPACE}/${DEB}"
+fi
+
 if [[ ! -f "$DEB_PATH" ]]; then
   echo "ci-publish-apt: missing package file: $DEB_PATH" >&2
   exit 1

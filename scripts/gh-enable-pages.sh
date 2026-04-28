@@ -32,4 +32,12 @@ fi
 
 OWNER="${REPO%%/*}"
 NAME="${REPO#*/}"
-echo "gh-enable-pages: site root is https://${OWNER}.github.io/${NAME}/ (deployed by the Release workflow)"
+DEFAULT_BRANCH="$(gh api "repos/${REPO}" --jq .default_branch)"
+echo "gh-enable-pages: allowing the APT Pages workflow to deploy from ${DEFAULT_BRANCH}"
+gh api --method PUT "repos/${REPO}/environments/github-pages" \
+  -F "deployment_branch_policy[protected_branches]=false" \
+  -F "deployment_branch_policy[custom_branch_policies]=true" >/dev/null
+gh api --method POST "repos/${REPO}/environments/github-pages/deployment-branch-policies" \
+  -f "name=${DEFAULT_BRANCH}" \
+  -f type=branch >/dev/null 2>&1 || true
+echo "gh-enable-pages: site root is https://${OWNER}.github.io/${NAME}/ (deployed by the APT Pages workflow)"

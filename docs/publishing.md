@@ -29,7 +29,7 @@ This is **not** an official Debian/Ubuntu archive; there is no distro review. Us
 3. **Enable GitHub Pages** (source: **GitHub Actions**):
    `npm run apt:enable-pages`  
    Or set the same under **Settings → Pages** (source: GitHub Actions).
-4. **Release:** push a tag `v*` (example `v0.1.0`). Workflow [`.github/workflows/release.yml`](../.github/workflows/release.yml) will typecheck, lint, build, compile, build `.deb`, attach it to a GitHub Release, generate the signed APT tree into a temporary Pages artifact, then deploy that artifact. The workflow does **not** commit generated release files back to `main`.
+4. **Release:** push a tag `v*` (example `v0.1.0`). Workflow [`.github/workflows/release.yml`](../.github/workflows/release.yml) will typecheck, lint, build, compile, build `.deb`, and attach it to a GitHub Release. When that succeeds, [`.github/workflows/apt-pages.yml`](../.github/workflows/apt-pages.yml) runs from `main`, downloads the release `.deb`, generates the signed APT tree into a temporary Pages artifact, and deploys that artifact. No generated release files are committed back to `main`.
 
 **Legacy secret name:** if you already use `GPG_PRIVATE_KEY`, the workflow will use it when `APT_GPG_PRIVATE_KEY` is unset.
 
@@ -37,7 +37,7 @@ This is **not** an official Debian/Ubuntu archive; there is no distro review. Us
 
 ## How the APT repo is laid out
 
-Source docs and APT configuration live on the **default branch** (usually `main`) under **`docs/`**. On each version tag, GitHub Actions copies those files into a Pages artifact, generates the signed APT repository there, and deploys it to `https://<owner>.github.io/<repo>/`.
+Source docs and APT configuration live on the **default branch** (usually `main`) under **`docs/`**. After each successful release tag, the APT Pages workflow runs from `main`, copies those files into a Pages artifact, generates the signed APT repository there, and deploys it to `https://<owner>.github.io/<repo>/`.
 
 - **Committed:** [`docs/conf/distributions`](conf/distributions), [`docs/.nojekyll`](.nojekyll), and the Markdown docs next to them.
 - **Generated only in the Pages artifact:** reprepro output — `pool/`, `dists/`, `db/` (and `lists/` if present), plus **`public.asc`** (armored **public** key for `apt`).
@@ -86,6 +86,7 @@ The release workflow installs Ruby `fpm` and packages `bin/botytrader` into `/us
 | Step | Location |
 |------|----------|
 | Tag trigger, checks, `.deb`, Release upload | [`.github/workflows/release.yml`](../.github/workflows/release.yml) |
+| Download release `.deb`, build and deploy Pages artifact | [`.github/workflows/apt-pages.yml`](../.github/workflows/apt-pages.yml) |
 | `gpg` import, `reprepro` into the temporary Pages artifact | [`scripts/ci-publish-apt.sh`](../scripts/ci-publish-apt.sh) |
 | Local key + `gh secret set` | [`scripts/apt-bootstrap-secrets.sh`](../scripts/apt-bootstrap-secrets.sh) |
 | `gh api` Pages enable | [`scripts/gh-enable-pages.sh`](../scripts/gh-enable-pages.sh) |
