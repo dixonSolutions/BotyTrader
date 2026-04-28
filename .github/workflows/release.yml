@@ -30,15 +30,23 @@ jobs:
       - name: Build bundle
         run: npm run build
 
-      - name: Compile binary
-        run: npm run compile
-
       - name: Package .deb
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           sudo gem install fpm --no-document
+          npm prune --omit=dev
+
           mkdir -p package-root/usr/local/bin
-          install -m 0755 bin/botytrader package-root/usr/local/bin/botytrader
+          mkdir -p package-root/opt/botytrader
+          cp -a dist node_modules package.json package-lock.json package-root/opt/botytrader/
+          cp -a config.example.toml .env.example package-root/opt/botytrader/
+          cat > package-root/usr/local/bin/botytrader <<'SCRIPT'
+          #!/usr/bin/env bash
+          export NODE_NO_WARNINGS=1
+          exec node /opt/botytrader/dist/index.js "$@"
+          SCRIPT
+          chmod 0755 package-root/usr/local/bin/botytrader
+
           fpm \
             --input-type dir \
             --output-type deb \
@@ -48,8 +56,9 @@ jobs:
             --description "Terminal-based AI trading assistant" \
             --maintainer "BotyTrader Maintainers" \
             --url "https://github.com/${GITHUB_REPOSITORY}" \
+            --depends "nodejs (>= 20)" \
             --chdir package-root \
-            usr
+            opt usr
           echo "DEB=botytrader_${VERSION}_amd64.deb" >> "$GITHUB_ENV"
 
       - name: Upload to GitHub Release

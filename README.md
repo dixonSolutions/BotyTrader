@@ -30,7 +30,7 @@ You do **not** need to copy `.env.example` manually; the wizard will collect eac
 | `npm run dev:watch` | Same as `dev` but restarts on source changes. **Avoid if you want to use the TUI** — `tsx watch` and Ink both read stdin and arrow keys can collide with the watcher. |
 | `npm run start` | Run the built bundle from `dist/`. |
 | `npm run build` | Bundle TypeScript with `tsup` (ESM + CJS). |
-| `npm run compile` | Compile to a single Linux x64 binary with `@yao-pkg/pkg`. |
+| `npm run compile` | Unsupported for the current Ink ESM runtime; releases package the Node app. |
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run lint` | ESLint over `src/`. |
 | `npm run mcp` | Run the standalone MCP server over stdio. |

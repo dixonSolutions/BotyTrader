@@ -7,12 +7,12 @@ How to distribute BotyTrader as an installable package — including APT (Debian
 | Method | `apt install` | No Node required | Effort |
 |--------|:---:|:---:|--------|
 | **npm global** | No | No | Minimal |
-| **GitHub Releases (.deb)** | Manual `dpkg -i` | Yes (binary) | Low |
-| **Self-hosted APT repo (GitHub Pages)** | Yes | Yes (binary) | Medium |
+| **GitHub Releases (.deb)** | Manual `dpkg -i` | No (`nodejs >= 20`) | Low |
+| **Self-hosted APT repo (GitHub Pages)** | Yes | No (`nodejs >= 20`) | Medium |
 | **Launchpad PPA** | Yes (Ubuntu) | Yes (binary) | Medium |
 | **Packagecloud.io** | Yes | Yes (binary) | Low (hosted) |
 
-**Recommended path:** compile to a standalone binary → package as `.deb` → host an unofficial APT repo on **GitHub Pages**, automated with **GitHub Actions** on version tags.
+**Recommended path:** bundle the Node app → package it as `.deb` with production dependencies → host an unofficial APT repo on **GitHub Pages**, automated with **GitHub Actions** on version tags.
 
 This is **not** an official Debian/Ubuntu archive; there is no distro review. Users trust **your** published signing key and metadata.
 
@@ -29,7 +29,7 @@ This is **not** an official Debian/Ubuntu archive; there is no distro review. Us
 3. **Enable GitHub Pages** (source: **GitHub Actions**):
    `npm run apt:enable-pages`  
    Or set the same under **Settings → Pages** (source: GitHub Actions).
-4. **Release:** push a tag `v*` (example `v0.1.0`). Workflow [`.github/workflows/release.yml`](../.github/workflows/release.yml) will typecheck, lint, build, compile, build `.deb`, and attach it to a GitHub Release. When that succeeds, [`.github/workflows/apt-pages.yml`](../.github/workflows/apt-pages.yml) runs from `main`, downloads the release `.deb`, generates the signed APT tree into a temporary Pages artifact, and deploys that artifact. No generated release files are committed back to `main`.
+4. **Release:** push a tag `v*` (example `v0.1.0`). Workflow [`.github/workflows/release.yml`](../.github/workflows/release.yml) will typecheck, lint, build the Node app package, build `.deb`, and attach it to a GitHub Release. When that succeeds, [`.github/workflows/apt-pages.yml`](../.github/workflows/apt-pages.yml) runs from `main`, downloads the release `.deb`, generates the signed APT tree into a temporary Pages artifact, and deploys that artifact. No generated release files are committed back to `main`.
 
 **Legacy secret name:** if you already use `GPG_PRIVATE_KEY`, the workflow will use it when `APT_GPG_PRIVATE_KEY` is unset.
 
@@ -70,14 +70,13 @@ sudo apt update && sudo apt upgrade botytrader
 
 ## Build details (local / CI)
 
-### Binary
+### App bundle
 
 - `npm run build` — bundle with `tsup`.
-- `npm run compile` — single Linux x64 binary with `@yao-pkg/pkg` → `bin/botytrader`.
 
 ### `.deb` (CI, on tag)
 
-The release workflow installs Ruby `fpm`, stages `bin/botytrader` as `/usr/local/bin/botytrader`, and packages it for **amd64** only (see workflow `fpm` invocation).
+The release workflow installs Ruby `fpm`, prunes dev dependencies, stages the app under `/opt/botytrader`, adds a `/usr/local/bin/botytrader` Node wrapper, and packages it for **amd64** only (see workflow `fpm` invocation). The package depends on `nodejs (>= 20)`.
 
 ---
 
@@ -141,7 +140,7 @@ Publishing uses `npm publish` (separate from APT).
 | Task | Tool |
 |------|------|
 | Bundle TypeScript | `tsup` |
-| Compile to native binary | `@yao-pkg/pkg` |
+| Runtime | `nodejs (>= 20)` |
 | Create `.deb` | `fpm` (in CI) |
 | Host unofficial APT repo | `reprepro` + GitHub Pages Actions artifact |
 | Automate | GitHub Actions + [`scripts/ci-publish-apt.sh`](../scripts/ci-publish-apt.sh) |

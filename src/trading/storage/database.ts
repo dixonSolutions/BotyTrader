@@ -3,16 +3,24 @@
  */
 
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 
 import { MIGRATIONS } from "./migrations.js";
+
+const require = createRequire(import.meta.url);
+
+function loadDatabase(): typeof Database {
+  return require("better-sqlite3") as typeof Database;
+}
 
 export function openTradingDatabase(absolutePath: string): Database.Database {
   const dir = path.dirname(absolutePath);
   fs.mkdirSync(dir, { recursive: true });
-  const db = new Database(absolutePath);
+  const DatabaseCtor = loadDatabase();
+  const db = new DatabaseCtor(absolutePath);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
 
