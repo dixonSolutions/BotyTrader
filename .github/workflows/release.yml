@@ -36,7 +36,7 @@ jobs:
       - name: Package .deb
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          gem install fpm --no-document
+          sudo gem install fpm --no-document
           fpm \
             --input-type dir \
             --output-type deb \
