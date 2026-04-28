@@ -37,6 +37,8 @@ jobs:
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           sudo gem install fpm --no-document
+          mkdir -p package-root/usr/local/bin
+          install -m 0755 bin/botytrader package-root/usr/local/bin/botytrader
           fpm \
             --input-type dir \
             --output-type deb \
@@ -46,8 +48,8 @@ jobs:
             --description "Terminal-based AI trading assistant" \
             --maintainer "BotyTrader Maintainers" \
             --url "https://github.com/${GITHUB_REPOSITORY}" \
-            --prefix /usr/local/bin \
-            bin/botytrader
+            --chdir package-root \
+            usr
           echo "DEB=botytrader_${VERSION}_amd64.deb" >> "$GITHUB_ENV"
 
       - name: Upload to GitHub Release

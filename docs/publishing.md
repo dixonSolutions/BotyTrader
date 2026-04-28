@@ -77,7 +77,7 @@ sudo apt update && sudo apt upgrade botytrader
 
 ### `.deb` (CI, on tag)
 
-The release workflow installs Ruby `fpm` and packages `bin/botytrader` into `/usr/local/bin` on **amd64** only (see workflow `fpm` invocation).
+The release workflow installs Ruby `fpm`, stages `bin/botytrader` as `/usr/local/bin/botytrader`, and packages it for **amd64** only (see workflow `fpm` invocation).
 
 ---
 
