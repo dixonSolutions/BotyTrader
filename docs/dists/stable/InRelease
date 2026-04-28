@@ -1,0 +1,39 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Origin: BotyTrader
+Label: BotyTrader
+Suite: stable
+Codename: stable
+Date: Tue, 28 Apr 2026 22:06:56 UTC
+Architectures: amd64
+Components: main
+Description: BotyTrader unofficial APT repository
+MD5Sum:
+ 8ae96401f46e4f708caccd1849cd6658 519 main/binary-amd64/Packages
+ c8c69046da38bc830cddea78ac15be75 379 main/binary-amd64/Packages.gz
+ 534c7c71320e23061a23214bee8846fc 139 main/binary-amd64/Release
+SHA1:
+ 9b4f714ca3fa647778c6c44884c6ff7b39e340a5 519 main/binary-amd64/Packages
+ 7fc88ba15df71136d788c5b4b9ff480ca13decc9 379 main/binary-amd64/Packages.gz
+ 5bde0b1a8b3a8ea25af0353d60a65612dc485fca 139 main/binary-amd64/Release
+SHA256:
+ 1e0fdc39c16b269ce981c305f769f88ea56cee42dc998b88697aa5d8440bd4a5 519 main/binary-amd64/Packages
+ ccfe4d07b64008bf7d02b6e49729bdc7812f671e9754d47a77a3543796aa4411 379 main/binary-amd64/Packages.gz
+ 384a360386cb9a42dec51f2e1b79c19d602b2e9430d93a22f9dfb10e232fbd7b 139 main/binary-amd64/Release
+-----BEGIN PGP SIGNATURE-----
+
+iQIzBAEBCgAdFiEEByZUIhjnV2bZeWeRD1u680sgn3EFAmnxL4AACgkQD1u680sg
+n3H4kg/9HkktqyJFAzU5Ea0+7zvt5bzmkTo2T9r0QulZjOWB09X1W83xC6GW27cQ
+3g/RSskzCrwbqC2xMFs98UjOQznNcjeAqdAWS/UjtGsTrMp0f62RH5+0/uVh0sCd
+NIKitkgBZCHuRSw/BIuat7MlT4BOP4RqhdSI4GoNlU84LTVPouBsjfUAbscCU6hB
+/Rr/RP/poC95tjJ/nPpoYp344c7NQpZF3Ms/bJUPF5XGq7S/hsXCQ1Ruu/cY4S93
+rcev18FE2Q5jEAq+KN8ohNm174fHn5JmmrAW9JoOTTq5hHCB/UTSPMze/V93VJB4
+ql8o1HTIt2ky2FLvWJPqE06qsZBS7MGuRaOn7KEd4nkA3IKoK9BwKiOO4vb2pCZq
+pxfdZxwpJaRtpJp/JUy9Yi4tUHKqyXxZ87Fy4otwgrP8SR8o5jkuMR79ckeb8dww
+dcLv95Xl6AIZM40oTvzK3nINyxQmdc9par6PLjzDSGhuAc2SXiu15AGNkvXizqiU
+8toAWWqNyhAvyC4d3P7SN7eM2DCuZM4WVHQbia/sMUupUoII7plZkIs8npkd/EKg
+C+eRn2ZBT2pV1y7sBbUdbVS9TohF05k3Ci4oFkNa+qs/xR8SEPTR17Y/iS2XusKy
+SemV4xKQeUWApivA46I+DSX24F/jbIRLKHq8MLhjyThofd+/4hQ=
+=7LjV
+-----END PGP SIGNATURE-----

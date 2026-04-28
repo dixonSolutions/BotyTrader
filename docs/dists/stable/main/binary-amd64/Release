@@ -1,0 +1,6 @@
+Archive: stable
+Component: main
+Origin: BotyTrader
+Label: BotyTrader
+Architecture: amd64
+Description: BotyTrader unofficial APT repository
