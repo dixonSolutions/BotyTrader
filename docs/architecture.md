@@ -1,15 +1,15 @@
 # Architecture
 
-High-level design for **BotyTrader**: TUI → Orchestrator → Agent Loop + Executor, with MCP tools and a layered memory system.
+High-level design for **BotyTrader**: runtime entry point → Orchestrator → Agent Loop + Executor, with MCP tools and a layered memory system.
 
 ## System diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        TUI (Ink)                             │
-│  [Home] [Insights] [Config] (+ Setup)                          │
+│                  Runtime entry point                         │
+│  TUI dashboard or headless `botytrader run` service            │
 └─────────────┬───────────────────────────────────────────────┘
-              │ renders state, receives pointer/text intents
+              │ renders state / keeps scheduler process alive
 ┌─────────────▼───────────────────────────────────────────────┐
 │                      Orchestrator                            │
 │  - manages watchlist symbols                                 │
@@ -54,7 +54,9 @@ High-level design for **BotyTrader**: TUI → Orchestrator → Agent Loop + Exec
 
 | Component | Responsibility |
 |-----------|----------------|
+| **Runtime entry** | Start the orchestrator from either the TUI (`botytrader`) or headless service mode (`botytrader run`). |
 | **TUI** | Render orchestrator/agent/memory state; send user intents (clicks, text fields) for config, models, and manual triggers. |
+| **Background service** | User-level systemd wrapper that runs the same orchestrator without opening the dashboard. |
 | **Orchestrator** | Watchlist; schedule agent cycles; open MCP/LLM session; apply **post-decision** actions (orders, memory sync). |
 | **Agent loop** | RAG-backed system prompt; call MCP tools during reasoning; emit **structured decision JSON** (not a tool). |
 | **Executor / broker** | Submit orders via the selected **broker adapter** (paper or live as configured). |

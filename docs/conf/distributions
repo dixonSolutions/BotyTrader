@@ -1,0 +1,8 @@
+Origin: BotyTrader
+Label: BotyTrader
+Suite: stable
+Codename: stable
+Architectures: amd64
+Components: main
+Description: BotyTrader unofficial APT repository
+SignWith: default

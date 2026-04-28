@@ -11,6 +11,7 @@ This documentation describes the intended architecture and configuration. Implem
 | [Architecture](architecture.md) | System diagram, components, data flow, source tree layout |
 | [Agent cycle](agent-cycle.md) | RAG injection, reasoning loop, tool contracts, decision JSON |
 | [Simple strategy](simple-strategy.md) | Deterministic technical + FinBERT strategy, SQLite state, cycles, execution gates |
+| [Background service](background-service.md) | Headless scheduler mode and systemd user service |
 | [Memory](memory.md) | Gemini embedder, Hugging Face Storage Buckets |
 | [MCP server](mcp-server.md) | MCP entry, tool registry, tools vs orchestrator actions |
 | [Broker adapters](broker-adapters.md) | `BrokerAdapter`, adapters, exit monitor |

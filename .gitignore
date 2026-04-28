@@ -35,4 +35,5 @@ yarn-error.log*
 
 # Packaging output
 *.deb
-apt-repo/
+# Local-only APT signing material (never commit)
+.apt-gpg-private.asc

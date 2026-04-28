@@ -12,264 +12,126 @@ How to distribute BotyTrader as an installable package — including APT (Debian
 | **Launchpad PPA** | Yes (Ubuntu) | Yes (binary) | Medium |
 | **Packagecloud.io** | Yes | Yes (binary) | Low (hosted) |
 
-**Recommended path:** compile to a standalone binary → package as `.deb` → host an APT repo on GitHub Pages, all automated with GitHub Actions.
+**Recommended path:** compile to a standalone binary → package as `.deb` → host an unofficial APT repo on **GitHub Pages**, automated with **GitHub Actions** on version tags.
+
+This is **not** an official Debian/Ubuntu archive; there is no distro review. Users trust **your** published signing key and metadata.
 
 ---
 
-## Step 1 — Build a self-contained binary
+## Maintainer quick path (APT + Pages)
 
-Using `@yao-pkg/pkg` (maintained fork of `pkg`) to bundle the TypeScript output and embed a Node.js runtime into a single executable. This means users do **not** need Node.js installed.
+1. **GitHub CLI:** `gh auth login` (repo scope).
+2. **One-time signing key + secrets:** from the repo root run  
+   `npm run apt:bootstrap-secrets`  
+   This generates a dedicated RSA signing key, writes **gitignored** `.apt-gpg-private.asc`, updates `.env` with `APT_GPG_KEY_ID`, and runs `gh secret set` for:
+   - `APT_GPG_PRIVATE_KEY` — armored private key (CI only).
+   - `APT_GPG_KEY_ID` — optional reference for humans; CI derives the fingerprint after import.
+3. **Enable GitHub Pages** (project site: **default branch** + **`/docs`** folder):  
+   `npm run apt:enable-pages`  
+   Or set the same under **Settings → Pages** (source: your default branch, folder `/docs`).
+4. **Release:** push a tag `v*` (example `v0.1.0`). Workflow [`.github/workflows/release.yml`](../.github/workflows/release.yml) will typecheck, lint, build, compile, build `.deb`, attach it to a GitHub Release, then check out the default branch and run [`scripts/ci-publish-apt.sh`](../scripts/ci-publish-apt.sh) to update the signed APT tree under **`docs/`** and push a commit to that branch (no separate publishing branch).
 
-```bash
-pnpm add -D tsup @yao-pkg/pkg
-```
-
-Add to `package.json`:
-
-```json
-{
-  "scripts": {
-    "build":    "tsup src/main.ts --format cjs --out-dir dist",
-    "compile":  "pkg dist/main.js --target node20-linux-x64 --output bin/botytrader"
-  }
-}
-```
-
-`tsup` bundles TypeScript → CommonJS. `pkg` compiles that bundle + Node runtime → a single native binary `bin/botytrader`.
-
-> **Ink and TTY:** Ink relies on raw TTY access. Verify the compiled binary works in a real terminal after first compilation — some Ink internals can need `--no-bytecode` flag on older pkg versions.
+**Legacy secret name:** if you already use `GPG_PRIVATE_KEY`, the workflow will use it when `APT_GPG_PRIVATE_KEY` is unset.
 
 ---
 
-## Step 2 — Create a `.deb` package with `fpm`
+## How the APT repo is laid out
 
-[fpm](https://fpm.readthedocs.io/) (Effing Package Management) is the easiest way to create `.deb` (and `.rpm`, `.apk`, etc.) packages without writing `debian/control` files by hand.
+Everything lives on the **default branch** (usually `main`) under **`docs/`**, which GitHub Pages serves as the site root (`https://<owner>.github.io/<repo>/` maps to the contents of `docs/`).
+
+- **Committed:** [`docs/conf/distributions`](conf/distributions), [`docs/.nojekyll`](.nojekyll) (disables Jekyll so APT files are served as static assets), and the Markdown docs next to them.
+- **Updated by CI on each release tag:** reprepro output — `docs/pool/`, `docs/dists/`, `docs/db/` (and `docs/lists/` if present), plus **`docs/public.asc`** (armored **public** key for `apt`).
+
+The private key never appears in the repo, on Pages, or in the install script.
+
+If you previously used a **`gh-pages`** branch, you can delete it after switching Pages to **branch + `/docs`**; it is no longer used by this project.
+
+---
+
+## User install (APT)
+
+After the first successful release and Pages build, the project site is:
+
+`https://<owner>.github.io/<repo>/`
+
+Use the root [`install.sh`](../install.sh) (pass `OWNER/REPO` if not running from a git clone):
 
 ```bash
-# Install fpm (requires Ruby)
-gem install fpm
+curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/install.sh | sudo bash -s -- OWNER/REPO
 ```
 
-Package the binary:
+That script installs the keyring from `public.asc`, writes `/etc/apt/sources.list.d/botytrader.list`, runs `apt-get update`, and installs `botytrader`. Later updates are normal:
 
 ```bash
-fpm \
-  --input-type dir \
-  --output-type deb \
-  --name botytrader \
-  --version 1.0.0 \
-  --architecture amd64 \
-  --description "Terminal-based AI trading assistant" \
-  --maintainer "Your Name <you@example.com>" \
-  --url "https://github.com/your-org/botytrader" \
-  --prefix /usr/local/bin \
-  bin/botytrader
-```
-
-This produces `botytrader_1.0.0_amd64.deb`. Users can install it immediately:
-
-```bash
-sudo dpkg -i botytrader_1.0.0_amd64.deb
-botytrader   # launches TUI
+sudo apt update && sudo apt upgrade botytrader
 ```
 
 ---
 
-## Step 3 — Host an APT repository on GitHub Pages
+## Build details (local / CI)
 
-This gives users a proper `apt install botytrader` experience.
+### Binary
 
-### 3a. Tools
+- `npm run build` — bundle with `tsup`.
+- `npm run compile` — single Linux x64 binary with `@yao-pkg/pkg` → `bin/botytrader`.
 
-```bash
-# Install reprepro (manages the APT repo structure)
-sudo apt install reprepro gnupg
-```
+### `.deb` (CI, on tag)
 
-### 3b. Generate a GPG signing key
-
-```bash
-gpg --full-generate-key   # RSA 4096, no expiry
-gpg --list-keys           # note the key ID
-gpg --armor --export YOUR_KEY_ID > public.asc
-```
-
-The public key (`public.asc`) must be published so users can trust the repo.
-
-### 3c. Initialise the repo
-
-```
-apt-repo/
-├── conf/
-│   └── distributions        ← reprepro config
-└── (reprepro generates the rest)
-```
-
-`conf/distributions`:
-
-```
-Origin: BotyTrader
-Label: BotyTrader
-Codename: stable
-Architectures: amd64 arm64
-Components: main
-Description: BotyTrader APT repository
-SignWith: YOUR_KEY_ID
-```
-
-Add a `.deb` and generate the repo index:
-
-```bash
-reprepro -b apt-repo includedeb stable botytrader_1.0.0_amd64.deb
-```
-
-### 3d. Publish to GitHub Pages
-
-Push the `apt-repo/` directory to a `gh-pages` branch (or `docs/` on main) and enable Pages in the repo settings.
-
-Users then add the repo once:
-
-```bash
-curl -fsSL https://your-org.github.io/botytrader/public.asc | \
-  sudo gpg --dearmor -o /etc/apt/keyrings/botytrader.gpg
-
-echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/botytrader.gpg] \
-  https://your-org.github.io/botytrader stable main" | \
-  sudo tee /etc/apt/sources.list.d/botytrader.list
-
-sudo apt update
-sudo apt install botytrader
-```
+The release workflow installs Ruby `fpm` and packages `bin/botytrader` into `/usr/local/bin` on **amd64** only (see workflow `fpm` invocation).
 
 ---
 
-## Step 4 — Automate with GitHub Actions
+## GitHub Actions reference
 
-Place this workflow at `.github/workflows/release.yml`. It runs on every version tag (`v*`) and:
+| Step | Location |
+|------|----------|
+| Tag trigger, checks, `.deb`, Release upload | [`.github/workflows/release.yml`](../.github/workflows/release.yml) |
+| Check out default branch, `gpg` import, `reprepro` under `docs/`, commit, push to default branch | [`scripts/ci-publish-apt.sh`](../scripts/ci-publish-apt.sh) |
+| Local key + `gh secret set` | [`scripts/apt-bootstrap-secrets.sh`](../scripts/apt-bootstrap-secrets.sh) |
+| `gh api` Pages enable | [`scripts/gh-enable-pages.sh`](../scripts/gh-enable-pages.sh) |
 
-1. Builds the binary.
-2. Creates the `.deb`.
-3. Publishes to GitHub Releases.
-4. Updates the APT repo on GitHub Pages.
+### Secrets
 
-```yaml
-name: Release
+| Name | Purpose |
+|------|---------|
+| `APT_GPG_PRIVATE_KEY` | Armored secret key used only in Actions to sign repository metadata |
+| `APT_GPG_KEY_ID` | Set by bootstrap for your notes; CI does not require it if import succeeds |
+| `GITHUB_TOKEN` | Provided automatically; used by the publish script to push the default branch |
 
-on:
-  push:
-    tags: ["v*"]
+Never commit `.env`, `.apt-gpg-private.asc`, or raw private key material.
 
-jobs:
-  build-and-publish:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+### Signing key hygiene
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
+- Generate **once** and reuse. Rotating the key invalidates existing installs until users replace `public.asc` / the keyring.
+- The bootstrap script creates a **no-passphrase** signing key so `reprepro` can run non-interactively in CI. If you replace it with a passphrase-protected key, you must configure batch signing (e.g. loopback pinentry) yourself.
 
-      - name: Install dependencies
-        run: npm ci
+---
 
-      - name: Build bundle
-        run: npm run build
+## Manual `.deb` (without APT)
 
-      - name: Compile binary
-        run: npm run compile
+Download the `.deb` from **GitHub Releases** for the tag, then:
 
-      - name: Package .deb
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          gem install fpm --no-document
-          fpm \
-            --input-type dir \
-            --output-type deb \
-            --name botytrader \
-            --version "$VERSION" \
-            --architecture amd64 \
-            --description "Terminal-based AI trading assistant" \
-            --prefix /usr/local/bin \
-            bin/botytrader
-          echo "DEB=botytrader_${VERSION}_amd64.deb" >> $GITHUB_ENV
-
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ env.DEB }}
-
-      - name: Update APT repo (gh-pages)
-        env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
-        run: |
-          echo "$GPG_PRIVATE_KEY" | gpg --import
-          git config user.email "ci@github.com"
-          git config user.name "GitHub Actions"
-          git fetch origin gh-pages
-          git checkout gh-pages
-          reprepro -b . includedeb stable "$DEB"
-          git add .
-          git commit -m "APT: add $DEB"
-          git push origin gh-pages
+```bash
+sudo apt install ./botytrader_VERSION_amd64.deb
 ```
-
-Store `GPG_PRIVATE_KEY` (exported with `gpg --armor --export-secret-keys YOUR_KEY_ID`) and `GPG_KEY_ID` as GitHub Actions secrets.
 
 ---
 
 ## Easier hosted alternative — Packagecloud.io
 
-[Packagecloud](https://packagecloud.io) hosts the APT repo for you, removing the need to manage GPG keys, `reprepro`, and GitHub Pages manually. It has a free tier for open-source projects.
-
-1. Create a Packagecloud account and repository (e.g. `your-org/botytrader`).
-2. Install the CLI: `gem install package_cloud`.
-3. Push the `.deb`:
-
-```bash
-package_cloud push your-org/botytrader/ubuntu/jammy botytrader_1.0.0_amd64.deb
-```
-
-Users install with:
-
-```bash
-curl -s https://packagecloud.io/install/repositories/your-org/botytrader/script.deb.sh | sudo bash
-sudo apt install botytrader
-```
-
-Packagecloud can also be called from GitHub Actions using `PACKAGECLOUD_TOKEN`.
+[Packagecloud](https://packagecloud.io) hosts the APT repo for you. See their docs for `script.deb.sh` and tokens.
 
 ---
 
-## Also publish to npm
+## npm global
 
-Users comfortable with Node.js can install without APT:
+Users with Node.js can install from the registry when published:
 
 ```bash
 npm install -g botytrader
 ```
 
-Add to `package.json`:
-
-```json
-{
-  "name": "botytrader",
-  "version": "1.0.0",
-  "bin": {
-    "botytrader": "./dist/main.js"
-  },
-  "files": ["dist/"]
-}
-```
-
-Publish:
-
-```bash
-npm login
-npm publish --access public
-```
-
-This distribution requires the user to have Node.js installed; the APT/binary path does not.
+Publishing uses `npm publish` (separate from APT).
 
 ---
 
@@ -279,10 +141,10 @@ This distribution requires the user to have Node.js installed; the APT/binary pa
 |------|------|
 | Bundle TypeScript | `tsup` |
 | Compile to native binary | `@yao-pkg/pkg` |
-| Create `.deb` | `fpm` |
-| Host APT repo (self) | `reprepro` + GitHub Pages |
-| Host APT repo (managed) | Packagecloud.io |
-| Automate everything | GitHub Actions |
+| Create `.deb` | `fpm` (in CI) |
+| Host unofficial APT repo | `reprepro` + GitHub Pages (**default branch** + `/docs`) |
+| Automate | GitHub Actions + [`scripts/ci-publish-apt.sh`](../scripts/ci-publish-apt.sh) |
+| Maintainer bootstrap | `npm run apt:bootstrap-secrets` |
 | npm distribution | `npm publish` |
 
 ## Related docs

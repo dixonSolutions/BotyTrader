@@ -13,6 +13,9 @@ cp config.example.toml config.toml
 
 # 3. Run — the TUI Setup wizard opens automatically if any required .env key is missing
 npm run dev
+
+# 4. Optional: keep scheduled trading running after the dashboard is closed
+npm run start -- service install
 ```
 
 You do **not** need to copy `.env.example` manually; the wizard will collect each missing credential and write `.env` (mode 0600) for you.
@@ -22,6 +25,8 @@ You do **not** need to copy `.env.example` manually; the wizard will collect eac
 | Script | Purpose |
 |--------|---------|
 | `npm run dev` | Launch Ink TUI + orchestrator (no watcher — recommended for using the TUI). |
+| `npm run start -- run` | Run the scheduler/orchestrator without opening the TUI. |
+| `npm run start -- service install` | Install, enable, and start the user-level background service. |
 | `npm run dev:watch` | Same as `dev` but restarts on source changes. **Avoid if you want to use the TUI** — `tsx watch` and Ink both read stdin and arrow keys can collide with the watcher. |
 | `npm run start` | Run the built bundle from `dist/`. |
 | `npm run build` | Bundle TypeScript with `tsup` (ESM + CJS). |
@@ -69,6 +74,7 @@ Full architecture, agent cycle, MCP tools, memory, brokers, TUI, configuration, 
 |-----|-------------|
 | [docs/architecture.md](docs/architecture.md) | System diagram, components, source layout |
 | [docs/agent-cycle.md](docs/agent-cycle.md) | RAG, reasoning, decision JSON, post-decision actions |
+| [docs/background-service.md](docs/background-service.md) | Headless scheduler mode and systemd user service |
 | [docs/memory.md](docs/memory.md) | Embedder, store, Hugging Face sync |
 | [docs/mcp-server.md](docs/mcp-server.md) | MCP tools vs orchestrator actions |
 | [docs/broker-adapters.md](docs/broker-adapters.md) | BrokerAdapter, adapters, exit monitor |
@@ -76,6 +82,16 @@ Full architecture, agent cycle, MCP tools, memory, brokers, TUI, configuration, 
 | [docs/configuration.md](docs/configuration.md) | `config.toml`, `.env`, secrets schema |
 | [docs/development.md](docs/development.md) | Setup and conventions |
 | [docs/publishing.md](docs/publishing.md) | APT repo, `.deb` packaging, npm, release pipeline |
+
+## APT install (unofficial repo)
+
+Releases publish a signed APT tree on **GitHub Pages** (default branch + `/docs`). After [enabling Pages and secrets](docs/publishing.md), install on Debian/Ubuntu (replace `OWNER/REPO`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/install.sh | sudo bash -s -- OWNER/REPO
+```
+
+Then use `sudo apt update && sudo apt upgrade botytrader` like any other package.
 
 ## Security
 

@@ -29,7 +29,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
-    "mcp": "NODE_NO_WARNINGS=1 tsx src/mcp/server.ts"
+    "mcp": "NODE_NO_WARNINGS=1 tsx src/mcp/server.ts",
+    "apt:bootstrap-secrets": "bash scripts/apt-bootstrap-secrets.sh",
+    "apt:enable-pages": "bash scripts/gh-enable-pages.sh"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.658.1",

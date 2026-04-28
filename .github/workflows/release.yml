@@ -11,6 +11,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -53,21 +55,14 @@ jobs:
         with:
           files: ${{ env.DEB }}
 
-      - name: Update APT repo (gh-pages)
-        if: ${{ env.PUBLISH_APT == 'true' }}
+      - name: Publish APT repository (docs/ on default branch)
         env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
-          PUBLISH_APT: ${{ vars.PUBLISH_APT }}
+          APT_GPG_PRIVATE_KEY_NEW: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          APT_GPG_PRIVATE_KEY_LEGACY: ${{ secrets.GPG_PRIVATE_KEY }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y reprepro gnupg
-          echo "$GPG_PRIVATE_KEY" | gpg --import
-          git config user.email "ci@github.com"
-          git config user.name "GitHub Actions"
-          git fetch origin gh-pages
-          git checkout gh-pages
-          reprepro -b . includedeb stable "$DEB"
-          git add .
-          git commit -m "APT: add $DEB"
-          git push origin gh-pages
+          export APT_GPG_PRIVATE_KEY="${APT_GPG_PRIVATE_KEY_NEW:-${APT_GPG_PRIVATE_KEY_LEGACY:-}}"
+          git fetch origin "${DEFAULT_BRANCH}"
+          git checkout "${DEFAULT_BRANCH}"
+          git reset --hard "origin/${DEFAULT_BRANCH}"
+          bash scripts/ci-publish-apt.sh
