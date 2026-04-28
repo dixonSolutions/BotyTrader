@@ -18,6 +18,11 @@ if [[ -z "${APT_GPG_PRIVATE_KEY:-}" ]]; then
   exit 1
 fi
 
+if [[ -z "${GITHUB_TOKEN:-}" ]]; then
+  echo "ci-publish-apt: GITHUB_TOKEN env must be set so CI can push APT metadata to ${DEFAULT_BRANCH}" >&2
+  exit 1
+fi
+
 DEB_PATH="${GITHUB_WORKSPACE}/${DEB}"
 if [[ ! -f "$DEB_PATH" ]]; then
   echo "ci-publish-apt: missing package file: $DEB_PATH" >&2
