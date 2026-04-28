@@ -105,8 +105,8 @@ if [[ -z "$PAGES_BASE_URL" ]]; then
   done
   echo "" >&2
   echo "Fix:" >&2
-  echo "  1. Settings → Pages: Deploy from branch, folder /docs (default branch)." >&2
-  echo "  2. Push a version tag (v*) so the Release workflow publishes docs/pool and docs/dists." >&2
+  echo "  1. Settings → Pages: Source = GitHub Actions." >&2
+  echo "  2. Push a version tag (v*) so the Release workflow deploys pool/ and dists/ to Pages." >&2
   echo "  3. Pass repo explicitly: sudo $0 ${OWNER}/${NAME}" >&2
   echo "     or full URL: sudo $0 https://github.com/${OWNER}/${NAME}" >&2
   exit 1

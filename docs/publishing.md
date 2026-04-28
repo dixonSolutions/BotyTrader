@@ -26,10 +26,10 @@ This is **not** an official Debian/Ubuntu archive; there is no distro review. Us
    This generates a dedicated RSA signing key, writes **gitignored** `.apt-gpg-private.asc`, updates `.env` with `APT_GPG_KEY_ID`, and runs `gh secret set` for:
    - `APT_GPG_PRIVATE_KEY` — armored private key (CI only).
    - `APT_GPG_KEY_ID` — optional reference for humans; CI derives the fingerprint after import.
-3. **Enable GitHub Pages** (project site: **default branch** + **`/docs`** folder):  
+3. **Enable GitHub Pages** (source: **GitHub Actions**):
    `npm run apt:enable-pages`  
-   Or set the same under **Settings → Pages** (source: your default branch, folder `/docs`).
-4. **Release:** push a tag `v*` (example `v0.1.0`). Workflow [`.github/workflows/release.yml`](../.github/workflows/release.yml) will typecheck, lint, build, compile, build `.deb`, attach it to a GitHub Release, then check out the default branch and run [`scripts/ci-publish-apt.sh`](../scripts/ci-publish-apt.sh) to update the signed APT tree under **`docs/`** and push a commit to that branch (no separate publishing branch).
+   Or set the same under **Settings → Pages** (source: GitHub Actions).
+4. **Release:** push a tag `v*` (example `v0.1.0`). Workflow [`.github/workflows/release.yml`](../.github/workflows/release.yml) will typecheck, lint, build, compile, build `.deb`, attach it to a GitHub Release, generate the signed APT tree into a temporary Pages artifact, then deploy that artifact. The workflow does **not** commit generated release files back to `main`.
 
 **Legacy secret name:** if you already use `GPG_PRIVATE_KEY`, the workflow will use it when `APT_GPG_PRIVATE_KEY` is unset.
 
@@ -37,14 +37,14 @@ This is **not** an official Debian/Ubuntu archive; there is no distro review. Us
 
 ## How the APT repo is laid out
 
-Everything lives on the **default branch** (usually `main`) under **`docs/`**, which GitHub Pages serves as the site root (`https://<owner>.github.io/<repo>/` maps to the contents of `docs/`).
+Source docs and APT configuration live on the **default branch** (usually `main`) under **`docs/`**. On each version tag, GitHub Actions copies those files into a Pages artifact, generates the signed APT repository there, and deploys it to `https://<owner>.github.io/<repo>/`.
 
-- **Committed:** [`docs/conf/distributions`](conf/distributions), [`docs/.nojekyll`](.nojekyll) (disables Jekyll so APT files are served as static assets), and the Markdown docs next to them.
-- **Updated by CI on each release tag:** reprepro output — `docs/pool/`, `docs/dists/`, `docs/db/` (and `docs/lists/` if present), plus **`docs/public.asc`** (armored **public** key for `apt`).
+- **Committed:** [`docs/conf/distributions`](conf/distributions), [`docs/.nojekyll`](.nojekyll), and the Markdown docs next to them.
+- **Generated only in the Pages artifact:** reprepro output — `pool/`, `dists/`, `db/` (and `lists/` if present), plus **`public.asc`** (armored **public** key for `apt`).
 
 The private key never appears in the repo, on Pages, or in the install script.
 
-If you previously used a **`gh-pages`** branch, you can delete it after switching Pages to **branch + `/docs`**; it is no longer used by this project.
+If you previously used a **`gh-pages`** branch or committed generated APT files to `main`, you can remove them after switching Pages to **GitHub Actions**; they are no longer used by this project.
 
 ---
 
@@ -86,7 +86,7 @@ The release workflow installs Ruby `fpm` and packages `bin/botytrader` into `/us
 | Step | Location |
 |------|----------|
 | Tag trigger, checks, `.deb`, Release upload | [`.github/workflows/release.yml`](../.github/workflows/release.yml) |
-| Check out default branch, `gpg` import, `reprepro` under `docs/`, commit, push to default branch | [`scripts/ci-publish-apt.sh`](../scripts/ci-publish-apt.sh) |
+| `gpg` import, `reprepro` into the temporary Pages artifact | [`scripts/ci-publish-apt.sh`](../scripts/ci-publish-apt.sh) |
 | Local key + `gh secret set` | [`scripts/apt-bootstrap-secrets.sh`](../scripts/apt-bootstrap-secrets.sh) |
 | `gh api` Pages enable | [`scripts/gh-enable-pages.sh`](../scripts/gh-enable-pages.sh) |
 
@@ -96,7 +96,7 @@ The release workflow installs Ruby `fpm` and packages `bin/botytrader` into `/us
 |------|---------|
 | `APT_GPG_PRIVATE_KEY` | Armored secret key used only in Actions to sign repository metadata |
 | `APT_GPG_KEY_ID` | Set by bootstrap for your notes; CI does not require it if import succeeds |
-| `GITHUB_TOKEN` | Provided automatically; used by the publish script to push the default branch |
+| `GITHUB_TOKEN` | Provided automatically; used by release and Pages deployment actions |
 
 Never commit `.env`, `.apt-gpg-private.asc`, or raw private key material.
 
@@ -142,7 +142,7 @@ Publishing uses `npm publish` (separate from APT).
 | Bundle TypeScript | `tsup` |
 | Compile to native binary | `@yao-pkg/pkg` |
 | Create `.deb` | `fpm` (in CI) |
-| Host unofficial APT repo | `reprepro` + GitHub Pages (**default branch** + `/docs`) |
+| Host unofficial APT repo | `reprepro` + GitHub Pages Actions artifact |
 | Automate | GitHub Actions + [`scripts/ci-publish-apt.sh`](../scripts/ci-publish-apt.sh) |
 | Maintainer bootstrap | `npm run apt:bootstrap-secrets` |
 | npm distribution | `npm publish` |

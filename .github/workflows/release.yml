@@ -9,6 +9,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy-pages.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -55,15 +60,20 @@ jobs:
         with:
           files: ${{ env.DEB }}
 
-      - name: Publish APT repository (docs/ on default branch)
+      - name: Build APT Pages artifact
         env:
           APT_GPG_PRIVATE_KEY_NEW: ${{ secrets.APT_GPG_PRIVATE_KEY }}
           APT_GPG_PRIVATE_KEY_LEGACY: ${{ secrets.GPG_PRIVATE_KEY }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GITHUB_TOKEN: ${{ github.token }}
+          PAGES_ROOT: ${{ runner.temp }}/botytrader-pages
         run: |
           export APT_GPG_PRIVATE_KEY="${APT_GPG_PRIVATE_KEY_NEW:-${APT_GPG_PRIVATE_KEY_LEGACY:-}}"
-          git fetch origin "${DEFAULT_BRANCH}"
-          git checkout "${DEFAULT_BRANCH}"
-          git reset --hard "origin/${DEFAULT_BRANCH}"
           bash scripts/ci-publish-apt.sh
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/botytrader-pages
+
+      - name: Deploy GitHub Pages
+        id: deploy-pages
+        uses: actions/deploy-pages@v4

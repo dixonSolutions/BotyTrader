@@ -85,7 +85,7 @@ Full architecture, agent cycle, MCP tools, memory, brokers, TUI, configuration, 
 
 ## APT install (unofficial repo)
 
-Releases publish a signed APT tree on **GitHub Pages** (default branch + `/docs`). After [enabling Pages and secrets](docs/publishing.md), install on Debian/Ubuntu (replace `OWNER/REPO`):
+Releases publish a signed APT tree on **GitHub Pages** from the release workflow. After [enabling Pages and secrets](docs/publishing.md), install on Debian/Ubuntu (replace `OWNER/REPO`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/install.sh | sudo bash -s -- OWNER/REPO

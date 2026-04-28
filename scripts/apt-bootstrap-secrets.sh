@@ -76,5 +76,5 @@ printf '%s' "$KEY_ID" | gh secret set APT_GPG_KEY_ID
 echo "apt-bootstrap-secrets: uploaded secret APT_GPG_KEY_ID"
 
 echo ""
-echo "Next: enable GitHub Pages (default branch + /docs) if not already — npm run apt:enable-pages or docs/publishing.md"
+echo "Next: enable GitHub Pages (source: GitHub Actions) if not already — npm run apt:enable-pages or docs/publishing.md"
 echo "      Tag a release: git tag v0.1.1 && git push origin v0.1.1"
