@@ -63,7 +63,7 @@ git config user.name "github-actions[bot]"
 git add "${REPREPRO_ROOT}/public.asc" "${REPREPRO_ROOT}/conf/distributions"
 if [[ -d "${REPREPRO_ROOT}/db" ]]; then git add "${REPREPRO_ROOT}/db"; fi
 if [[ -d "${REPREPRO_ROOT}/dists" ]]; then git add "${REPREPRO_ROOT}/dists"; fi
-if [[ -d "${REPREPRO_ROOT}/pool" ]]; then git add "${REPREPRO_ROOT}/pool"; fi
+if [[ -d "${REPREPRO_ROOT}/pool" ]]; then git add -f "${REPREPRO_ROOT}/pool"; fi
 if [[ -d "${REPREPRO_ROOT}/lists" ]]; then git add "${REPREPRO_ROOT}/lists"; fi
 
 if git diff --staged --quiet; then
