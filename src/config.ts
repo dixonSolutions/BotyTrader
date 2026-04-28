@@ -308,7 +308,9 @@ export function syncTradingModeFromBroker(config: Config): void {
 export function loadConfig(paths: Paths = resolvePaths()): Config {
   if (!fs.existsSync(paths.configToml)) {
     // Fall back to example so first-run is not fatal; user is told to copy it.
-    const example = path.join(paths.root, "config.example.toml");
+    const example = process.env.BOTYTRADER_EXAMPLE_CONFIG
+      ? path.resolve(process.env.BOTYTRADER_EXAMPLE_CONFIG)
+      : path.join(paths.root, "config.example.toml");
     if (!fs.existsSync(example)) {
       throw new Error(
         `config.toml not found at ${paths.configToml} and no config.example.toml to fall back to.`,

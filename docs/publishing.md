@@ -76,7 +76,7 @@ sudo apt update && sudo apt upgrade botytrader
 
 ### `.deb` (CI, on tag)
 
-The release workflow installs Ruby `fpm`, prunes dev dependencies, stages the app under `/opt/botytrader`, adds a `/usr/local/bin/botytrader` Node wrapper, and packages it for **amd64** only (see workflow `fpm` invocation). The package depends on `nodejs (>= 20)`.
+The release workflow installs Ruby `fpm`, prunes dev dependencies, stages the app under `/opt/botytrader`, adds a `/usr/local/bin/botytrader` Node wrapper, and packages it for **amd64** only (see workflow `fpm` invocation). The wrapper points first-run config fallback at `/opt/botytrader/config.example.toml`. The package depends on `nodejs (>= 20)`.
 
 ---
 

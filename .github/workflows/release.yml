@@ -43,6 +43,7 @@ jobs:
           cat > package-root/usr/local/bin/botytrader <<'SCRIPT'
           #!/usr/bin/env bash
           export NODE_NO_WARNINGS=1
+          export BOTYTRADER_EXAMPLE_CONFIG="${BOTYTRADER_EXAMPLE_CONFIG:-/opt/botytrader/config.example.toml}"
           exec node /opt/botytrader/dist/index.js "$@"
           SCRIPT
           chmod 0755 package-root/usr/local/bin/botytrader
