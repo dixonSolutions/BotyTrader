@@ -40,7 +40,7 @@ function logToItem(entry: LogEntry): LogItem {
   else if (entry.level === "agent") icon = "◆";
 
   // Highlight key message patterns
-  let message = entry.message;
+  const message = entry.message;
   if (message.startsWith("▶▶▶")) icon = "▶";
   if (message.startsWith("◀◀◀")) icon = "◀";
   if (message.includes("DECISION:")) icon = "★";
