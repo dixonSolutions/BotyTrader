@@ -248,6 +248,8 @@ export function ModelsScreen({ orchestrator, onBack }: Props): React.ReactElemen
       <Box flexShrink={0}>
         <Header
           breadcrumb={["BotyTrader", "Models"]}
+          brokerName={orchestrator.getState().brokerName}
+          connected={orchestrator.getState().connected}
           onBack={onBack}
         />
       </Box>

@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 
 import type Database from "better-sqlite3";
 
-import type { SentimentCacheRow, SignalRow, WatchlistRow } from "../types.js";
+import type { SentimentCacheRow, SignalRow, WatchlistRow, DiscoveryRow } from "../types.js";
 import type { NewsItem, PriceBar } from "../../execution/broker.js";
 
 const STRATEGY_VERSION = "simple-v1";

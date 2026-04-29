@@ -57,9 +57,6 @@ interface Props {
   currency: string;
 }
 
-const HEADER_HEIGHT = 3; // Top border + header row + separator
-const FOOTER_HEIGHT = 2; // Bottom border + spacing
-
 export function HoldingsCompactTable({
   positions,
   symbolsFilter,

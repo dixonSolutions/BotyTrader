@@ -9,7 +9,6 @@ import { Button } from "../../components/Button.js";
 import { Panel, StatRow } from "../../components/Layout.js";
 import { icons } from "../../components/icons.js";
 import { theme } from "../../theme.js";
-import type { Config } from "../../../config.js";
 import { writeConfig } from "../../../config.js";
 import type { Orchestrator } from "../../../orchestrator.js";
 

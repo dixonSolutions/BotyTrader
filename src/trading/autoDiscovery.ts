@@ -9,7 +9,7 @@ import { submitOrder, type SubmitOrderResult } from "../actions/alpaca.js";
 import type { Decision } from "../actions/types.js";
 import type { Config, Secrets } from "../config.js";
 import type { BrokerAdapter } from "../execution/broker.js";
-import { runDiscoveryScan, selectTopCandidates } from "./discovery/scanner.js";
+import { runDiscoveryScan } from "./discovery/scanner.js";
 import type { TradingRepositories } from "./storage/repositories.js";
 import type { DiscoveryCandidate } from "./discovery/scanner.js";
 

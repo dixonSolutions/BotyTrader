@@ -181,6 +181,7 @@ export class Orchestrator {
       performance: emptyPerformance(),
       previousSession: readSessionSnapshot(paths.root),
       nextScheduledCycleAt: null,
+      nextScheduledCycleType: null,
       agentLive: null,
       lastCompletedReasoning: null,
       trading: this.tradingEngine.getStatus(),
@@ -884,7 +885,7 @@ export class Orchestrator {
             detail: `${d.action.toUpperCase()} qty=${d.qty} conf=${d.confidence.toFixed(2)}`,
           },
         });
-        this.log("info", `[${symbol}] ★ DECISION: ${d.action.toUpperCase()} | qty=${d.qty} | conf=${d.confidence.toFixed(2)}${d.signal ? ` | signal=${d.signal}` : ""}`);
+        this.log("info", `[${symbol}] ★ DECISION: ${d.action.toUpperCase()} | qty=${d.qty} | conf=${d.confidence.toFixed(2)}`);
         if (r) this.log("info", `[${symbol}] Reasoning: ${r}`);
         break;
       }

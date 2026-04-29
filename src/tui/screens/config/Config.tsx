@@ -17,7 +17,6 @@ import { SecretsEditor } from "./SecretsEditor.js";
 import { SettingsEditor } from "./SettingsEditor.js";
 import { ScheduleEditor } from "./ScheduleEditor.js";
 import { TradingEditor } from "./TradingEditor.js";
-import { DiscoveryEditor } from "./DiscoveryEditor.js";
 import type { Orchestrator, OrchestratorState } from "../../../orchestrator.js";
 import { buildConfigSearchHits, hitHaystack, matchesConfigFilter, type ConfigTabId } from "./configSearchIndex.js";
 

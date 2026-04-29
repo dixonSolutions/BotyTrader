@@ -54,7 +54,7 @@ export function AgentActivity({ state }: Props): React.ReactElement {
           {state.tradingBusy
             ? "🌟 Running discovery scan..."
             : discoveryEnabled
-              ? `🌟 Active · every ${state.discoveryCycleSeconds}s${state.autoDiscoveryEnabled ? " · auto-invest ON" : ""}`
+              ? `🌟 Active · every ${state.discoveryCycleSeconds}s`
               : "🌟 Disabled · enable in Config → Discovery"}
         </Text>
       </Box>

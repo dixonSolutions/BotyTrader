@@ -74,7 +74,7 @@ export function App({ orchestrator, initialRoute = "home" }: Props): React.React
   if (route === "models") {
     return (
       <Box flexDirection="column" flexGrow={1} minHeight={0}>
-        <ModelsScreen orchestrator={orchestrator} state={state} onBack={goHome} />
+        <ModelsScreen orchestrator={orchestrator} onBack={goHome} />
       </Box>
     );
   }
