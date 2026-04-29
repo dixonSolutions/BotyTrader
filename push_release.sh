@@ -97,15 +97,44 @@ check_working_tree() {
 
 # Main release process
 main() {
-    local increment_type="${1:-patch}"  # Default to patch increment
+    local increment_type="patch"  # Default to patch increment
+    local auto_confirm=false
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --yes|-y)
+                auto_confirm=true
+                shift
+                ;;
+            major|minor|patch)
+                increment_type="$1"
+                shift
+                ;;
+            -h|--help)
+                echo "Usage: $0 [options] [major|minor|patch]"
+                echo ""
+                echo "Options:"
+                echo "  -y, --yes    Auto-confirm without prompting"
+                echo "  -h, --help   Show this help message"
+                echo ""
+                echo "Version increments:"
+                echo "  major - Increment major version (x.0.0)"
+                echo "  minor - Increment minor version (x.y.0)"
+                echo "  patch - Increment patch version (x.y.z) [default]"
+                exit 0
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                echo "Use -h or --help for usage information"
+                exit 1
+                ;;
+        esac
+    done
 
     # Validate increment type
     if [[ ! "$increment_type" =~ ^(major|minor|patch)$ ]]; then
         log_error "Invalid increment type: $increment_type"
-        echo "Usage: $0 [major|minor|patch]"
-        echo "  major - Increment major version (x.0.0)"
-        echo "  minor - Increment minor version (x.y.0)"
-        echo "  patch - Increment patch version (x.y.z) [default]"
         exit 1
     fi
 
@@ -157,12 +186,16 @@ main() {
 
     log_info "New version will be: $new_version (tag: $new_tag)"
 
-    # Confirm with user
-    read -p "Proceed with release? [y/N] " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        log_info "Release cancelled"
-        exit 0
+    # Confirm with user (unless auto-confirmed)
+    if [[ "$auto_confirm" == false ]]; then
+        read -p "Proceed with release? [y/N] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_info "Release cancelled"
+            exit 0
+        fi
+    else
+        log_info "Auto-confirming release..."
     fi
 
     # Update package.json
