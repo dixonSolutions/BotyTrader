@@ -178,6 +178,9 @@ function currentValue(field: FieldId, config: Orchestrator["config"]): number {
     case "candidate":
       return config.schedule.candidate_cycle_seconds;
     case "discovery":
-      return config.schedule.discovery_cycle_seconds;
+      // Use new discovery config if enabled, otherwise fall back to schedule
+      return config.discovery?.enabled
+        ? (config.discovery.scan_interval_seconds ?? config.schedule.discovery_cycle_seconds)
+        : config.schedule.discovery_cycle_seconds;
   }
 }

@@ -17,7 +17,7 @@ import { SecretsEditor } from "./SecretsEditor.js";
 import { SettingsEditor } from "./SettingsEditor.js";
 import { ScheduleEditor } from "./ScheduleEditor.js";
 import { TradingEditor } from "./TradingEditor.js";
-import { FinbertModelsEditor } from "./FinbertModelsEditor.js";
+import { DiscoveryEditor } from "./DiscoveryEditor.js";
 import type { Orchestrator, OrchestratorState } from "../../../orchestrator.js";
 import { buildConfigSearchHits, hitHaystack, matchesConfigFilter, type ConfigTabId } from "./configSearchIndex.js";
 
@@ -26,7 +26,7 @@ type ConfigTab = ConfigTabId;
 const TABS: readonly TabItem<ConfigTab>[] = [
   { id: "settings", label: "Settings", icon: icons.bullet },
   { id: "trading", label: "Trading", icon: icons.bullet },
-  { id: "models", label: "Models", icon: icons.bullet },
+  { id: "discovery", label: "Discovery", icon: icons.bullet },
   { id: "secrets", label: "Secrets", icon: icons.bullet },
   { id: "schedule", label: "Schedule", icon: icons.bullet },
 ];
@@ -80,7 +80,7 @@ export function Config({ orchestrator, state, onBack }: Props): React.ReactEleme
       <ScrollRegion>
         <ScreenFrame
           title="Config"
-          subtitle="Settings, trading, FinBERT (Models tab), secrets, and schedules — persisted to config.toml / .env."
+          subtitle="Settings, trading, discovery, secrets, and schedules — persisted to config.toml / .env."
         >
         <Box marginBottom={1} flexDirection="row" flexWrap="wrap">
           <Button
@@ -114,15 +114,6 @@ export function Config({ orchestrator, state, onBack }: Props): React.ReactEleme
             orchestrator={orchestrator}
             active={editorActive("trading")}
             focusRowId={tab === "trading" ? focusRowId : null}
-            onFocusRowConsumed={() => setFocusRowId(null)}
-          />
-        ) : null}
-        {!globalSearchOpen && tab === "models" ? (
-          <FinbertModelsEditor
-            orchestrator={orchestrator}
-            trading={state.trading}
-            active={editorActive("models")}
-            focusRowId={tab === "models" ? focusRowId : null}
             onFocusRowConsumed={() => setFocusRowId(null)}
           />
         ) : null}
@@ -195,8 +186,8 @@ function GlobalSearchOverlay({
               ? "Settings"
               : h.tab === "trading"
                 ? "Trading"
-                : h.tab === "models"
-                  ? "Models"
+                : h.tab === "discovery"
+                  ? "Discovery"
                   : h.tab === "secrets"
                     ? "Secrets"
                     : "Schedule";

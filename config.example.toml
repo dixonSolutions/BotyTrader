@@ -81,6 +81,36 @@ symbols = ["SPY", "QQQ"]
 # When false, orchestrator logs decisions but does not submit orders.
 enabled = false
 
+# Discovery scanner — finds new stocks beyond the watchlist
+[discovery]
+enabled = false
+# Scan every 4 hours for new opportunities
+scan_interval_seconds = 14400
+# Evaluate up to 20 candidates per scan
+max_candidates = 20
+# Minimum rank score (0-100) to consider
+min_rank_score = 50
+# Max new positions per scan
+max_new_positions = 3
+# Auto-invest in top discoveries
+auto_invest = false
+# Hybrid score threshold for auto-investment
+invest_threshold = 0.4
+# Cooldown before rediscovering (hours)
+cooldown_hours = 48
+# Include ETFs and tech stocks in scans
+include_etfs = true
+include_tech = true
+# News query for discovering trending stocks
+news_query = "stocks earnings"
+#
+# NEW USER AUTO-DISCOVERY:
+# When enabled + auto_invest is true, if you have NO positions in your portfolio,
+# the bot will automatically run discovery and invest in the top 3-5 best stocks
+# to get your portfolio started. This only runs once when positions are empty.
+#
+# To enable: discovery.enabled = true AND discovery.auto_invest = true
+
 [features]
 # Long-term memory (Gemini embeddings + HF bucket). Keys stay in .env when off; app skips RAG/writes.
 memory_enabled = true

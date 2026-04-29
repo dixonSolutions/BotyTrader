@@ -1,6 +1,7 @@
 /**
- * Recent rows from the `signals` SQLite table — ink-virtual-list for performance.
- * Only renders visible items in the viewport.
+ * RecentAgentActions — compact card showing latest agent trading decisions.
+ * Uses ink-virtual-list for performance on large signal histories.
+ * Displays action type, symbol, timestamp, technical/sentiment/final scores.
  */
 
 import { useMouse } from "@zenobius/ink-mouse";
@@ -13,7 +14,7 @@ import type { SignalRow, TradeAction } from "../../../trading/types.js";
 import { formatInsightLocalShort } from "./insightFormatters.js";
 
 function scoreTxt(n: number | null): string {
-  return n === null || Number.isNaN(n) ? "—" : n.toFixed(2);
+  return n === null || Number.isNaN(n) ? "—" : n.toFixed(1);
 }
 
 function actionIcon(action: TradeAction): string {
@@ -42,8 +43,10 @@ function actionColor(action: TradeAction): string {
   }
 }
 
+const ACTION_COLUMNS = ["Time", "Sym", "Act", "Tech", "Sent", "Final", "Exec"];
+
 /** Single row item for virtual list */
-interface SignalItem {
+interface ActionItem {
   time: string;
   symbol: string;
   action: TradeAction;
@@ -54,9 +57,7 @@ interface SignalItem {
   executed: string;
 }
 
-const SIGNAL_COLUMNS = ["Time (local)", "Sym", "Act", "Tech", "Sent", "Final", "OK"];
-
-function signalToItem(s: SignalRow, timeW: number, symW: number): SignalItem {
+function signalToItem(s: SignalRow, timeW: number, symW: number): ActionItem {
   const t = formatInsightLocalShort(s.createdAt);
   const time = t.length > timeW ? `${t.slice(0, timeW - 1)}…` : t;
   const sym = s.symbol.length > symW ? `${s.symbol.slice(0, symW - 1)}…` : s.symbol;
@@ -74,18 +75,17 @@ function signalToItem(s: SignalRow, timeW: number, symW: number): SignalItem {
 
 interface Props {
   signals: SignalRow[];
-  dbOpenError: string | null;
   viewportRows: number;
 }
 
-export function TradingSignalsTable({ signals, dbOpenError, viewportRows }: Props): React.ReactElement {
+export function RecentAgentActions({ signals, viewportRows }: Props): React.ReactElement {
   const { stdout } = useStdout();
   const mouse = useMouse();
   const cols = stdout.columns ?? 80;
   const listRef = useRef<VirtualListRef>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
 
-  const timeW = Math.min(22, Math.max(16, Math.floor(cols * 0.22)));
+  const timeW = Math.min(20, Math.max(14, Math.floor(cols * 0.18)));
   const symW = 6;
 
   const items = useMemo(
@@ -93,7 +93,7 @@ export function TradingSignalsTable({ signals, dbOpenError, viewportRows }: Prop
     [signals, timeW, symW],
   );
 
-  const listHeight = Math.max(10, viewportRows);
+  const listHeight = Math.max(3, Math.floor(viewportRows));
 
   /** Wheel scroll handler for virtual list navigation */
   useEffect(() => {
@@ -116,15 +116,15 @@ export function TradingSignalsTable({ signals, dbOpenError, viewportRows }: Prop
   }, [items.length]);
 
   const colWidths = useMemo(() => {
-    return SIGNAL_COLUMNS.map((col, idx) => {
+    return ACTION_COLUMNS.map((col, idx) => {
       const headerLen = col.length;
-      const key = ["time", "symbol", "actionStr", "technical", "sentiment", "final", "executed"][idx] as keyof SignalItem;
+      const key = ["time", "symbol", "actionStr", "technical", "sentiment", "final", "executed"][idx] as keyof ActionItem;
       const cellLens = items.map((row) => String(row[key] ?? "").length);
       return Math.max(headerLen, ...cellLens, 3) + 2;
     });
   }, [items]);
 
-  const totalWidth = colWidths.reduce((a, b) => a + b, 0) + SIGNAL_COLUMNS.length + 1;
+  const totalWidth = colWidths.reduce((a, b) => a + b, 0) + ACTION_COLUMNS.length + 1;
 
   function padCell(text: string, width: number): string {
     const padding = Math.max(0, width - text.length);
@@ -134,15 +134,20 @@ export function TradingSignalsTable({ signals, dbOpenError, viewportRows }: Prop
   function renderHeader(): React.ReactElement {
     return (
       <Box flexDirection="column">
+        <Box marginLeft={1} marginBottom={1}>
+          <Text bold color={theme.color.primary}>
+            Recent agent actions
+          </Text>
+        </Box>
         <Text bold color={theme.color.muted}>
           {"┌" + "─".repeat(totalWidth - 2) + "┐"}
         </Text>
         <Box flexDirection="row">
           <Text bold color={theme.color.muted}>│</Text>
-          {SIGNAL_COLUMNS.map((col, i) => (
+          {ACTION_COLUMNS.map((col, i) => (
             <React.Fragment key={col}>
               <Text bold color={theme.color.primary}>{padCell(col, colWidths[i]!)}</Text>
-              {i < SIGNAL_COLUMNS.length - 1 ? <Text bold color={theme.color.muted}>│</Text> : null}
+              {i < ACTION_COLUMNS.length - 1 ? <Text bold color={theme.color.muted}>│</Text> : null}
             </React.Fragment>
           ))}
           <Text bold color={theme.color.muted}>│</Text>
@@ -162,7 +167,7 @@ export function TradingSignalsTable({ signals, dbOpenError, viewportRows }: Prop
     );
   }
 
-  function renderItem({ item, isSelected }: { item: SignalItem; isSelected: boolean }): React.ReactElement {
+  function renderItem({ item, isSelected }: { item: ActionItem; isSelected: boolean }): React.ReactElement {
     const values = [item.time, item.symbol, item.actionStr, item.technical, item.sentiment, item.final, item.executed];
     const selectionPrefix = isSelected ? "> " : "  ";
 
@@ -184,38 +189,40 @@ export function TradingSignalsTable({ signals, dbOpenError, viewportRows }: Prop
     );
   }
 
-  const hint = dbOpenError ? (
-    <Text color={theme.color.danger}>Database unavailable — signals not loaded.</Text>
-  ) : signals.length === 0 ? (
-    <Text dimColor>No signals recorded yet (run trading cycles with DB open).</Text>
-  ) : null;
-
-  if (items.length === 0) {
-    return (
-      <Box flexDirection="column" paddingX={1} paddingBottom={1}>
-        {hint}
-      </Box>
-    );
-  }
+  const hasSignals = signals.length > 0;
 
   return (
-    <Box flexDirection="column" paddingX={1} paddingBottom={1}>
-      {hint}
-      {renderHeader()}
-      <Box height={listHeight} flexDirection="column">
-        <VirtualList
-          ref={listRef}
-          items={items}
-          height={listHeight}
-          renderItem={renderItem}
-          selectedIndex={selectedIndex}
-          showOverflowIndicators
-        />
-      </Box>
-      {renderFooter()}
-      <Text dimColor color={theme.color.muted}>
-        {items.length} signal{items.length !== 1 ? "s" : ""} · wheel to scroll
-      </Text>
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={theme.color.muted}
+      paddingX={1}
+      marginTop={1}
+      marginBottom={1}
+    >
+      {!hasSignals ? (
+        <Text dimColor color={theme.color.muted}>
+          No recent actions — run trading cycles to generate signals.
+        </Text>
+      ) : (
+        <Box flexDirection="column">
+          {renderHeader()}
+          <Box height={listHeight} flexDirection="column">
+            <VirtualList
+              ref={listRef}
+              items={items}
+              height={listHeight}
+              renderItem={renderItem}
+              selectedIndex={selectedIndex}
+              showOverflowIndicators
+            />
+          </Box>
+          {renderFooter()}
+          <Text dimColor color={theme.color.muted}>
+            {items.length} action{items.length !== 1 ? "s" : ""} · wheel to scroll
+          </Text>
+        </Box>
+      )}
     </Box>
   );
 }

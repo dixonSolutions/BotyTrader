@@ -12,6 +12,7 @@ import { AlpacaSearchScreen } from "./screens/AlpacaSearchScreen.js";
 import { Home, type HomeChoice } from "./screens/Home.js";
 import { Insights } from "./screens/insights/Insights.js";
 import { Config } from "./screens/config/Config.js";
+import { ModelsScreen } from "./screens/ModelsScreen.js";
 import type { Orchestrator, OrchestratorState } from "../orchestrator.js";
 
 type Route = "home" | HomeChoice;
@@ -66,6 +67,14 @@ export function App({ orchestrator, initialRoute = "home" }: Props): React.React
     return (
       <Box flexDirection="column" flexGrow={1} minHeight={0}>
         <AlpacaSearchScreen orchestrator={orchestrator} state={state} onBack={goHome} />
+      </Box>
+    );
+  }
+
+  if (route === "models") {
+    return (
+      <Box flexDirection="column" flexGrow={1} minHeight={0}>
+        <ModelsScreen orchestrator={orchestrator} state={state} onBack={goHome} />
       </Box>
     );
   }

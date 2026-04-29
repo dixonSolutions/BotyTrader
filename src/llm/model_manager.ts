@@ -48,6 +48,7 @@ export interface PullProgress {
 
 export class ModelManager {
   private readonly config: Config;
+  private abortController: AbortController | null = null;
 
   constructor(config: Config) {
     this.config = config;
@@ -126,12 +127,22 @@ export class ModelManager {
    * Pull a model id by running the same resolver the runtime uses. Progress
    * events are forwarded to `onProgress` (one per file) so the TUI can render
    * a real bar, not a fake one.
+   *
+   * Call `cancelPull()` to abort an in-progress download.
    */
   async pull(modelId: string, onProgress?: (p: PullProgress) => void): Promise<void> {
     const id = modelId.trim();
     if (!id) throw new Error("Model id is empty.");
 
+    // Create new abort controller for this pull
+    this.abortController = new AbortController();
+
     const cb: ProgressCallback = (event) => {
+      // Check for cancellation
+      if (this.abortController?.signal.aborted) {
+        throw new Error("Download cancelled by user");
+      }
+
       if (!onProgress) return;
       if (event.status === "progress") {
         const total = event.total;
@@ -158,7 +169,18 @@ export class ModelManager {
     } finally {
       this.config.model.id = previousId;
       await disposeLocalPipeline();
+      this.abortController = null;
     }
+  }
+
+  /** Abort an in-progress download initiated by `pull()`. */
+  cancelPull(): void {
+    this.abortController?.abort();
+  }
+
+  /** Returns true if a download is currently in progress. */
+  get isPulling(): boolean {
+    return this.abortController !== null && !this.abortController.signal.aborted;
   }
 
   /**

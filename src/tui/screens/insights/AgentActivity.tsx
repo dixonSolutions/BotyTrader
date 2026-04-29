@@ -19,6 +19,7 @@ export function AgentActivity({ state }: Props): React.ReactElement {
   const nextLine = formatNextCycle(state);
   const liveLine = formatLive(state);
   const reasoning = state.lastCompletedReasoning?.trim() || null;
+  const discoveryEnabled = state.discoveryCycleSeconds > 0;
 
   return (
     <Box
@@ -35,7 +36,7 @@ export function AgentActivity({ state }: Props): React.ReactElement {
         <Text color={theme.color.muted}>Previous run (last exit) </Text>
         <Text color={theme.color.text}>
           {prev
-            ? `${formatInsightLocal(prev.endedAt)} · ${prev.cyclesCompleted} cycle(s) · last ${prev.lastSymbol ?? "—"} ${prev.lastAction ?? ""}${prev.lastReasoningSnippet ? ` · “${prev.lastReasoningSnippet}”` : ""}`
+            ? `${formatInsightLocal(prev.endedAt)} · ${prev.cyclesCompleted} cycle(s) · last ${prev.lastSymbol ?? "—"} ${prev.lastAction ?? ""}${prev.lastReasoningSnippet ? ` · "${prev.lastReasoningSnippet}"` : ""}`
             : "No snapshot yet — quit once with `q` to save a summary."}
         </Text>
       </Box>
@@ -46,6 +47,16 @@ export function AgentActivity({ state }: Props): React.ReactElement {
       <Box marginTop={1} flexDirection="column">
         <Text color={theme.color.muted}>Right now </Text>
         <Text color={state.cycling ? theme.color.warn : theme.color.text}>{liveLine}</Text>
+      </Box>
+      <Box marginTop={1} flexDirection="column">
+        <Text color={theme.color.muted}>Discovery scanner </Text>
+        <Text color={state.tradingBusy ? theme.color.warn : discoveryEnabled ? theme.color.success : theme.color.muted}>
+          {state.tradingBusy
+            ? "🌟 Running discovery scan..."
+            : discoveryEnabled
+              ? `🌟 Active · every ${state.discoveryCycleSeconds}s${state.autoDiscoveryEnabled ? " · auto-invest ON" : ""}`
+              : "🌟 Disabled · enable in Config → Discovery"}
+        </Text>
       </Box>
       <Box marginTop={1} flexDirection="column">
         <Text color={theme.color.muted}>Latest reasoning </Text>

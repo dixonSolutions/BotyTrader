@@ -44,7 +44,7 @@ export type AgentStep =
   | { kind: "rag"; hits: number }
   | { kind: "model_response"; content: string }
   | { kind: "tool_call"; name: string; args: unknown }
-  | { kind: "tool_result"; name: string; ok: boolean }
+  | { kind: "tool_result"; name: string; ok: boolean; result?: unknown; error?: string }
   | { kind: "decision"; decision: Decision };
 
 export async function runCycle(opts: RunCycleOptions): Promise<CycleResult> {
@@ -123,14 +123,17 @@ export async function runCycle(opts: RunCycleOptions): Promise<CycleResult> {
 
     let resultText: string;
     let ok = true;
+    let resultData: unknown;
+    let errorMsg: string | undefined;
     try {
-      const result = await callTool(action.name, action.args, ctx, config);
-      resultText = JSON.stringify(result);
+      resultData = await callTool(action.name, action.args, ctx, config);
+      resultText = JSON.stringify(resultData);
     } catch (err) {
       ok = false;
-      resultText = `Error: ${err instanceof Error ? err.message : String(err)}`;
+      errorMsg = err instanceof Error ? err.message : String(err);
+      resultText = `Error: ${errorMsg}`;
     }
-    onStep?.({ kind: "tool_result", name: action.name, ok });
+    onStep?.({ kind: "tool_result", name: action.name, ok, result: resultData, error: errorMsg });
 
     messages.push({
       role: "user",

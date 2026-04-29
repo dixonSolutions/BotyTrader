@@ -272,6 +272,109 @@ export class TradingRepositories {
     return rows.map(mapSignalRow);
   }
 
+  /** Insert a discovered stock candidate. */
+  insertDiscovery(row: {
+    symbol: string;
+    source: string;
+    technicalScore: number;
+    sentimentScore: number;
+    hybridScore: number;
+    rankScore: number;
+    priceAtDiscovery: number;
+    action: string;
+    notes?: string;
+  }): string {
+    const id = newId("disc");
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO discoveries (id, symbol, discovered_at, source, technical_score, sentiment_score, hybrid_score, rank_score, price_at_discovery, action, invested, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        row.symbol.toUpperCase(),
+        now,
+        row.source,
+        row.technicalScore,
+        row.sentimentScore,
+        row.hybridScore,
+        row.rankScore,
+        row.priceAtDiscovery,
+        row.action,
+        0,
+        row.notes ?? null,
+      );
+    return id;
+  }
+
+  /** Mark a discovery as invested. */
+  markDiscoveryInvested(id: string): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(`UPDATE discoveries SET invested = 1, invested_at = ? WHERE id = ?`)
+      .run(now, id);
+  }
+
+  /** Get recent discoveries, optionally filtering by invested status. */
+  listDiscoveries(opts: { limit?: number; invested?: boolean | null } = {}): DiscoveryRow[] {
+    let sql = `SELECT * FROM discoveries`;
+    const params: (number | string)[] = [];
+
+    if (opts.invested !== null && opts.invested !== undefined) {
+      sql += ` WHERE invested = ?`;
+      params.push(opts.invested ? 1 : 0);
+    }
+
+    sql += ` ORDER BY discovered_at DESC`;
+
+    if (opts.limit) {
+      sql += ` LIMIT ?`;
+      params.push(opts.limit);
+    }
+
+    const rows = this.db.prepare(sql).all(...params) as {
+      id: string;
+      symbol: string;
+      discovered_at: string;
+      source: string;
+      technical_score: number;
+      sentiment_score: number;
+      hybrid_score: number;
+      rank_score: number;
+      price_at_discovery: number;
+      action: string;
+      invested: number;
+      invested_at: string | null;
+      notes: string | null;
+    }[];
+
+    return rows.map((r) => ({
+      id: r.id,
+      symbol: r.symbol,
+      discoveredAt: r.discovered_at,
+      source: r.source,
+      technicalScore: r.technical_score,
+      sentimentScore: r.sentiment_score,
+      hybridScore: r.hybrid_score,
+      rankScore: r.rank_score,
+      priceAtDiscovery: r.price_at_discovery,
+      action: r.action as DiscoveryRow["action"],
+      invested: r.invested === 1,
+      investedAt: r.invested_at,
+      notes: r.notes,
+    }));
+  }
+
+  /** Check if symbol was recently discovered (within cooldown hours). */
+  isRecentlyDiscovered(symbol: string, cooldownHours: number): boolean {
+    const cutoff = new Date(Date.now() - cooldownHours * 3600 * 1000).toISOString();
+    const row = this.db
+      .prepare(`SELECT 1 FROM discoveries WHERE symbol = ? AND discovered_at > ? LIMIT 1`)
+      .get(symbol.toUpperCase(), cutoff) as { 1: number } | undefined;
+    return row !== undefined;
+  }
+
 }
 
 function mapSignalRow(r: {

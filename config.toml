@@ -3,7 +3,7 @@ embedding_model = "text-embedding-004"
 
 [model]
 provider = "local"
-id = ""
+id = "Xenova/TinyLlama-1.1B-Chat-v1.0"
 dtype = "q4"
 device = "auto"
 max_new_tokens = 512
@@ -43,7 +43,7 @@ agent_interval_seconds = 300
 exit_monitor_interval_seconds = 30
 portfolio_cycle_seconds = 300
 candidate_cycle_seconds = 1_800
-discovery_cycle_seconds = 14_400
+discovery_cycle_seconds = 600
 
 [risk]
 max_position_pct = 10
@@ -80,3 +80,16 @@ Rules:
 - Prefer hold with low confidence when data is missing."""
 max_iterations = 8
 sentiment_weight = 0.35
+
+[discovery]
+enabled = false
+scan_interval_seconds = 14_400
+max_candidates = 20
+min_rank_score = 50
+max_new_positions = 3
+auto_invest = false
+invest_threshold = 0.4
+cooldown_hours = 48
+include_etfs = true
+include_tech = true
+news_query = "stocks earnings"

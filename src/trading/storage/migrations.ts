@@ -57,4 +57,22 @@ export const MIGRATIONS: readonly string[] = [
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
 CREATE INDEX IF NOT EXISTS idx_price_history_sym_tf ON price_history(symbol, timeframe);
 `,
+  // Migration 5: Add discoveries table for auto-discovery feature
+  `CREATE TABLE IF NOT EXISTS discoveries (
+  id TEXT PRIMARY KEY NOT NULL,
+  symbol TEXT NOT NULL,
+  discovered_at TEXT NOT NULL,
+  source TEXT,
+  technical_score REAL,
+  sentiment_score REAL,
+  hybrid_score REAL,
+  rank_score REAL,
+  price_at_discovery REAL,
+  action TEXT,
+  invested INTEGER NOT NULL DEFAULT 0,
+  invested_at TEXT,
+  notes TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_discoveries_symbol ON discoveries(symbol);
+CREATE INDEX IF NOT EXISTS idx_discoveries_rank ON discoveries(rank_score DESC);`,
 ];

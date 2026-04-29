@@ -8,3 +8,9 @@ export { computeSimpleStrategy } from "./strategy/simple.js";
 export { openTradingDatabase } from "./storage/database.js";
 export { TradingRepositories, hashHeadline, newsItemsForSymbol } from "./storage/repositories.js";
 export { aggregateNewsSentiment, scoreHeadline, getLocalClassifier } from "./sentiment/finbert.js";
+export { runDiscoveryScan, selectTopCandidates, type DiscoveryCandidate, type ScanResult } from "./discovery/scanner.js";
+export {
+  checkAndRunAutoDiscovery,
+  createAutoDiscoveryStatus,
+  type AutoDiscoveryStatus,
+} from "./autoDiscovery.js";

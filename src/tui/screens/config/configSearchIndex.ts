@@ -5,7 +5,7 @@
 import { SECRET_DESCRIPTIONS, SecretsSchema, BrokerPlatformSchema } from "../../../config.js";
 import type { Orchestrator } from "../../../orchestrator.js";
 
-export type ConfigTabId = "settings" | "trading" | "models" | "secrets" | "schedule";
+export type ConfigTabId = "settings" | "trading" | "discovery" | "secrets" | "schedule";
 
 export interface ConfigSearchHit {
   tab: ConfigTabId;
@@ -99,23 +99,6 @@ function secretsHits(): ConfigSearchHit[] {
   }));
 }
 
-function modelsHits(config: Orchestrator["config"]): ConfigSearchHit[] {
-  return [
-    {
-      tab: "models",
-      rowId: "finbert_official",
-      title: "FinBERT (ProsusAI/finbert)",
-      subtitle: `Provider: ${config.sentiment.provider} · Repo: ${config.sentiment.model_id}`,
-    },
-    {
-      tab: "models",
-      rowId: "agent_blend",
-      title: "Agent ReAct: sentiment vs technical blend",
-      subtitle: `Current weight: ${config.agent.sentiment_weight}`,
-    },
-  ];
-}
-
 function scheduleHits(config: Orchestrator["config"]): ConfigSearchHit[] {
   return [
     {
@@ -151,11 +134,53 @@ function scheduleHits(config: Orchestrator["config"]): ConfigSearchHit[] {
   ];
 }
 
+function discoveryHits(config: Orchestrator["config"]): ConfigSearchHit[] {
+  const d = config.discovery ?? {};
+  return [
+    {
+      tab: "discovery",
+      rowId: "discovery_enabled",
+      title: "Discovery scanner",
+      subtitle: `Enabled: ${d.enabled ?? false}`,
+    },
+    {
+      tab: "discovery",
+      rowId: "auto_invest",
+      title: "Auto-invest in discoveries",
+      subtitle: `Enabled: ${d.auto_invest ?? false} · Threshold: ${d.invest_threshold ?? 0.4}`,
+    },
+    {
+      tab: "discovery",
+      rowId: "scan_interval",
+      title: "Discovery scan interval",
+      subtitle: `Current: ${d.scan_interval_seconds ?? 14400}s (${((d.scan_interval_seconds ?? 14400) / 3600).toFixed(1)}h)`,
+    },
+    {
+      tab: "discovery",
+      rowId: "max_candidates",
+      title: "Max candidates per scan",
+      subtitle: `Current: ${d.max_candidates ?? 20}`,
+    },
+    {
+      tab: "discovery",
+      rowId: "min_rank_score",
+      title: "Minimum rank score",
+      subtitle: `Current: ${d.min_rank_score ?? 50} (0-100)`,
+    },
+    {
+      tab: "discovery",
+      rowId: "max_new_positions",
+      title: "Max new positions per scan",
+      subtitle: `Current: ${d.max_new_positions ?? 3}`,
+    },
+  ];
+}
+
 export function buildConfigSearchHits(orchestrator: Orchestrator): ConfigSearchHit[] {
   return [
     ...settingsHits(orchestrator.config),
     ...tradingHits(orchestrator.config),
-    ...modelsHits(orchestrator.config),
+    ...discoveryHits(orchestrator.config),
     ...secretsHits(),
     ...scheduleHits(orchestrator.config),
   ];

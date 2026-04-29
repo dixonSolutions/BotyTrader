@@ -91,6 +91,8 @@ export interface OrchestratorState {
   previousSession: PreviousSessionSummary | null;
   /** ISO time when the next automatic cycle is scheduled (null if paused or not yet armed). */
   nextScheduledCycleAt: string | null;
+  /** Type of the next scheduled cycle for display purposes. */
+  nextScheduledCycleType: "agent" | "portfolio" | "candidate" | "discovery" | null;
   /** Non-null while the LLM loop is progressing for a symbol. */
   agentLive: AgentLiveState | null;
   /** Reasoning text from the most recently completed cycle (cleared on new cycle start). */
@@ -637,6 +639,11 @@ export class Orchestrator {
       })();
     }, this.config.schedule.candidate_cycle_seconds * 1000);
 
+    // Use discovery-specific interval if enabled, otherwise fall back to schedule
+    const discoveryIntervalMs = this.config.discovery?.enabled
+      ? (this.config.discovery.scan_interval_seconds ?? this.config.schedule.discovery_cycle_seconds) * 1000
+      : this.config.schedule.discovery_cycle_seconds * 1000;
+
     this.discoveryTimer = setInterval(() => {
       if (this.paused) return;
       void (async () => {
@@ -648,7 +655,7 @@ export class Orchestrator {
           this.pushTradingState();
         }
       })();
-    }, this.config.schedule.discovery_cycle_seconds * 1000);
+    }, discoveryIntervalMs);
 
     this.pushTradingState();
   }
@@ -722,6 +729,22 @@ export class Orchestrator {
       );
       return;
     }
+
+    // Check if user has no positions - run auto-discovery to bootstrap portfolio
+    if (this.config.trading.enabled && this.config.discovery?.enabled && this.config.discovery.auto_invest) {
+      try {
+        const triggered = await this.tradingEngine.checkAndRunAutoDiscovery();
+        if (triggered) {
+          this.log("info", "Auto-discovery triggered: User has no positions. Finding best stocks to invest...");
+          await this.refreshAccount();
+          this.pushTradingState();
+          // After auto-discovery completes, we can still run the normal cycle
+        }
+      } catch (e) {
+        this.log("error", `Auto-discovery check failed: ${describe(e)}`);
+      }
+    }
+
     this.cycleInFlight = true;
     this.update({
       cycling: true,
@@ -730,7 +753,8 @@ export class Orchestrator {
       lastCompletedReasoning: null,
     });
     const startedAt = new Date().toISOString();
-    this.log("info", `Cycle start: ${symbol}`);
+    const startedAtMs = Date.now();
+    this.log("info", `▶▶▶ Cycle START: ${symbol} at ${startedAt.slice(11, 19)}`);
 
     try {
       const result = await runCycle({
@@ -789,6 +813,8 @@ export class Orchestrator {
       await this.refreshAccount();
       await this.refreshOrders();
       this.recomputePerformance();
+      const durationMs = Date.now() - startedAtMs;
+      this.log("info", `◀◀◀ Cycle END: ${symbol} | duration ${durationMs}ms | decision: ${result.decision.action}`);
     } catch (err) {
       this.log("error", `Cycle failed for ${symbol}: ${describe(err)}`);
     } finally {
@@ -804,41 +830,77 @@ export class Orchestrator {
         this.update({
           agentLive: { symbol, phase: "RAG", detail: `${step.hits} memory snippets` },
         });
-        this.log("agent", `[${symbol}] RAG injected ${step.hits} memories`);
+        this.log("info", `[${symbol}] Memory: ${step.hits} relevant past decisions loaded`);
         break;
-      case "tool_call":
+      case "tool_call": {
+        // Log tool call with key args for visibility
+        const args = step.args as Record<string, unknown>;
+        let detail = "";
+        if (step.name === "fetch_price" && args.symbol) detail = ` for ${String(args.symbol)}`;
+        else if (step.name === "fetch_bars" && args.symbol) detail = ` ${String(args.symbol)} ${String(args.n)} bars`;
+        else if (step.name === "fetch_news" && args.query) detail = ` query: "${String(args.query).slice(0, 30)}..."`;
+        else if (step.name === "compute_sentiment" && args.text) detail = ` analyzing ${String(args.text).length} chars`;
+        else if (step.name === "calc_technical_score" && args.symbol) detail = ` ${String(args.symbol)} SMA/RSI calc`;
+        else if (args.symbol) detail = ` ${String(args.symbol)}`;
+
         this.update({
-          agentLive: { symbol, phase: "Tool call", detail: step.name },
+          agentLive: { symbol, phase: "Tool call", detail: `${step.name}${detail}` },
         });
-        this.log("agent", `[${symbol}] tool: ${step.name}`);
+        this.log("info", `[${symbol}] → ${step.name}${detail}`);
         break;
-      case "tool_result":
+      }
+      case "tool_result": {
         this.update({
           agentLive: {
             symbol,
             phase: "Tool result",
-            detail: `${step.name} ${step.ok ? "ok" : "failed"}`,
+            detail: `${step.name} ${step.ok ? "✓" : "✗"}`,
           },
         });
-        if (!step.ok) this.log("warn", `[${symbol}] tool failed: ${step.name}`);
+        // Log summary of results for key tools
+        if (step.ok && step.result) {
+          const r = step.result as Record<string, unknown>;
+          if (step.name === "calc_technical_score" && r.score !== undefined) {
+            this.log("info", `[${symbol}] Technical score: ${Number(r.score).toFixed(2)} (SMA/RSI weighted)`);
+          } else if (step.name === "compute_sentiment" && r.sentiment !== undefined) {
+            this.log("info", `[${symbol}] Sentiment: ${String(r.sentiment)} (FinBERT analysis)`);
+          } else if (step.name === "fetch_price" && r.price !== undefined) {
+            this.log("info", `[${symbol}] Current price: $${Number(r.price).toFixed(2)}`);
+          } else if (step.name === "fetch_account" && r.buying_power !== undefined) {
+            this.log("info", `[${symbol}] Account: $${Number(r.buying_power).toFixed(2)} buying power`);
+          }
+        } else if (!step.ok) {
+          this.log("warn", `[${symbol}] Tool failed: ${step.name} — ${step.error || "unknown error"}`);
+        }
         break;
+      }
       case "decision": {
-        const r = clipReasoning(step.decision.reasoning, 160);
+        const d = step.decision;
+        const r = clipReasoning(d.reasoning, 180);
         this.update({
           agentLive: {
             symbol,
             phase: "Decision",
-            detail: `${step.decision.action} qty=${step.decision.qty} conf=${step.decision.confidence.toFixed(2)}${r ? ` · ${r}` : ""}`,
+            detail: `${d.action.toUpperCase()} qty=${d.qty} conf=${d.confidence.toFixed(2)}`,
           },
         });
-        this.log("agent", `[${symbol}] decision: ${step.decision.action} qty=${step.decision.qty} conf=${step.decision.confidence}`);
+        this.log("info", `[${symbol}] ★ DECISION: ${d.action.toUpperCase()} | qty=${d.qty} | conf=${d.confidence.toFixed(2)}${d.signal ? ` | signal=${d.signal}` : ""}`);
+        if (r) this.log("info", `[${symbol}] Reasoning: ${r}`);
         break;
       }
-      case "model_response":
+      case "model_response": {
+        // Extract thought/action from model output for logging
+        const content = step.content || "";
+        const thoughtMatch = content.match(/Thought:\s*(.+?)(?:\n|$)/i);
+        const thought = thoughtMatch ? thoughtMatch[1]?.trim().slice(0, 120) : "";
         this.update({
-          agentLive: { symbol, phase: "Model", detail: "Reading model output…" },
+          agentLive: { symbol, phase: "Thinking", detail: thought || "Processing..." },
         });
+        if (thought) {
+          this.log("info", `[${symbol}] 💭 ${thought}`);
+        }
         break;
+      }
     }
   }
 

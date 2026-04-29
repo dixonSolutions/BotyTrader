@@ -15,7 +15,7 @@ import { Footer, Header, ScreenFrame } from "../components/Layout.js";
 import { icons } from "../components/icons.js";
 import { theme } from "../theme.js";
 
-export type HomeChoice = "config" | "insights" | "alpaca_search";
+export type HomeChoice = "config" | "insights" | "alpaca_search" | "models";
 
 interface Props {
   brokerName: string;
@@ -38,10 +38,16 @@ const ORDER: { id: HomeChoice; label: string; description: string; icon: string 
     description: "News from Alpaca Market Data — ticker, comma list, or keyword filter on recent headlines.",
   },
   {
+    id: "models",
+    label: "Models",
+    icon: icons.download,
+    description: "Download LLMs for intelligent trading — allocation, risk review, news analysis.",
+  },
+  {
     id: "config",
     label: "Config",
     icon: icons.bullet,
-    description: "Settings, trading, FinBERT (Models tab), secrets, schedules — Bot › Config › Models.",
+    description: "Settings, trading, discovery, secrets, schedules — full configuration.",
   },
 ];
 

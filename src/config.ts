@@ -187,6 +187,32 @@ export const ConfigSchema = z.object({
       sentiment_weight: z.number().min(0).max(1).default(0.35),
     })
     .default({}),
+  /** Discovery scanner — finds and ranks new stocks beyond the watchlist. */
+  discovery: z
+    .object({
+      enabled: z.boolean().default(false),
+      /** How often to scan for new stocks (in seconds). Default: 4 hours. */
+      scan_interval_seconds: z.number().int().positive().default(14_400),
+      /** Max candidates to evaluate per scan. */
+      max_candidates: z.number().int().positive().default(20),
+      /** Min rank score (0-100) to be considered for investment. */
+      min_rank_score: z.number().min(0).max(100).default(50),
+      /** Max new positions to open from a single discovery scan. */
+      max_new_positions: z.number().int().min(0).default(3),
+      /** Enable auto-invest in discovered stocks. */
+      auto_invest: z.boolean().default(false),
+      /** Hybrid score threshold for auto-investment (default: 0.4). */
+      invest_threshold: z.number().min(-1).max(1).default(0.4),
+      /** Hours before a symbol can be rediscovered. */
+      cooldown_hours: z.number().int().positive().default(48),
+      /** Include popular ETFs in discovery scan. */
+      include_etfs: z.boolean().default(true),
+      /** Include tech stocks in discovery scan. */
+      include_tech: z.boolean().default(true),
+      /** News query for discovery (e.g., "stocks earnings", "breakthrough"). */
+      news_query: z.string().default("stocks earnings"),
+    })
+    .default({}),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 

@@ -61,3 +61,19 @@ export interface PriceBarRow {
   c: number;
   v: number;
 }
+
+export interface DiscoveryRow {
+  id: string;
+  symbol: string;
+  discoveredAt: string;
+  source: string;
+  technicalScore: number;
+  sentimentScore: number;
+  hybridScore: number;
+  rankScore: number;
+  priceAtDiscovery: number;
+  action: TradeAction;
+  invested: boolean;
+  investedAt: string | null;
+  notes: string | null;
+}
