@@ -82,7 +82,7 @@ After=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=${systemdQuote(cwd)}
+WorkingDirectory=${cwd}
 ExecStart=${execStart}
 Restart=always
 RestartSec=10
