@@ -66,7 +66,6 @@ exit_monitor_interval_seconds = 30
 # Simple trading engine cycles
 portfolio_cycle_seconds = 300
 candidate_cycle_seconds = 1800
-discovery_cycle_seconds = 14400
 
 [risk]
 max_position_pct = 10.0
@@ -74,6 +73,7 @@ min_confidence_to_trade = 0.6
 stop_loss_pct = 2.0
 take_profit_pct = 5.0
 
+# At least one ticker is required — the simple strategy only trades symbols you list here.
 [watchlist]
 symbols = ["SPY", "QQQ"]
 
@@ -81,35 +81,29 @@ symbols = ["SPY", "QQQ"]
 # When false, orchestrator logs decisions but does not submit orders.
 enabled = false
 
-# Discovery scanner — finds new stocks beyond the watchlist
-[discovery]
+# Autonomous optimizer — feature snapshots, walk-forward challengers, learning-rate nudges to config.
+[optimization]
 enabled = false
-# Scan every 4 hours for new opportunities
-scan_interval_seconds = 14400
-# Evaluate up to 20 candidates per scan
-max_candidates = 20
-# Minimum rank score (0-100) to consider
-min_rank_score = 50
-# Max new positions per scan
-max_new_positions = 3
-# Auto-invest in top discoveries
-auto_invest = false
-# Hybrid score threshold for auto-investment
-invest_threshold = 0.4
-# Cooldown before rediscovering (hours)
-cooldown_hours = 48
-# Include ETFs and tech stocks in scans
-include_etfs = true
-include_tech = true
-# News query for discovering trending stocks
-news_query = "stocks earnings"
-#
-# NEW USER AUTO-DISCOVERY:
-# When enabled + auto_invest is true, if you have NO positions in your portfolio,
-# the bot will automatically run discovery and invest in the top 3-5 best stocks
-# to get your portfolio started. This only runs once when positions are empty.
-#
-# To enable: discovery.enabled = true AND discovery.auto_invest = true
+# daily | sunday | monday | … | saturday — which local day to run (ignored when daily).
+schedule_day = "daily"
+# Local hour 0–23 (runs once within the first ~6 minutes of that hour).
+schedule_hour = 2
+lookback_days = 14
+challenger_count = 50
+mutation_rate = 0.02
+learning_rate = 0.1
+improvement_threshold = 0.1
+max_single_weight = 0.3
+stress_test_enabled = true
+# Near-miss hybrids below buy_threshold but within this fraction still get a snapshot row.
+shadow_capture_range = 0.2
+# Hours until outcome % is computed from price_history daily closes.
+exit_window_hours = 48
+# Challenger tuning (also written into feature snapshot metadata; nudged when optimizer wins).
+challenger_swap_threshold = 10
+challenger_min_entry_score = 75
+min_snapshots = 10
+outcome_monitor_interval_minutes = 30
 
 [features]
 # Long-term memory (Gemini embeddings + HF bucket). Keys stay in .env when off; app skips RAG/writes.

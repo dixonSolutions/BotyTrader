@@ -17,6 +17,8 @@ import { SecretsEditor } from "./SecretsEditor.js";
 import { SettingsEditor } from "./SettingsEditor.js";
 import { ScheduleEditor } from "./ScheduleEditor.js";
 import { TradingEditor } from "./TradingEditor.js";
+import { IndicatorsEditor } from "./IndicatorsEditor.js";
+import { OptimizationEditor } from "./OptimizationEditor.js";
 import type { Orchestrator, OrchestratorState } from "../../../orchestrator.js";
 import { buildConfigSearchHits, hitHaystack, matchesConfigFilter, type ConfigTabId } from "./configSearchIndex.js";
 
@@ -25,7 +27,8 @@ type ConfigTab = ConfigTabId;
 const TABS: readonly TabItem<ConfigTab>[] = [
   { id: "settings", label: "Settings", icon: icons.bullet },
   { id: "trading", label: "Trading", icon: icons.bullet },
-  { id: "discovery", label: "Discovery", icon: icons.bullet },
+  { id: "indicators", label: "Indicators", icon: icons.bullet },
+  { id: "optimize", label: "Optimize", icon: icons.bullet },
   { id: "secrets", label: "Secrets", icon: icons.bullet },
   { id: "schedule", label: "Schedule", icon: icons.bullet },
 ];
@@ -79,7 +82,7 @@ export function Config({ orchestrator, state, onBack }: Props): React.ReactEleme
       <ScrollRegion>
         <ScreenFrame
           title="Config"
-          subtitle="Settings, trading, discovery, secrets, and schedules — persisted to config.toml / .env."
+          subtitle="Settings, trading, indicators, optimizer, secrets, and schedules — persisted to config.toml / .env."
         >
         <Box marginBottom={1} flexDirection="row" flexWrap="wrap">
           <Button
@@ -113,6 +116,22 @@ export function Config({ orchestrator, state, onBack }: Props): React.ReactEleme
             orchestrator={orchestrator}
             active={editorActive("trading")}
             focusRowId={tab === "trading" ? focusRowId : null}
+            onFocusRowConsumed={() => setFocusRowId(null)}
+          />
+        ) : null}
+        {!globalSearchOpen && tab === "indicators" ? (
+          <IndicatorsEditor
+            orchestrator={orchestrator}
+            active={editorActive("indicators")}
+            focusRowId={tab === "indicators" ? focusRowId : null}
+            onFocusRowConsumed={() => setFocusRowId(null)}
+          />
+        ) : null}
+        {!globalSearchOpen && tab === "optimize" ? (
+          <OptimizationEditor
+            orchestrator={orchestrator}
+            active={editorActive("optimize")}
+            focusRowId={tab === "optimize" ? focusRowId : null}
             onFocusRowConsumed={() => setFocusRowId(null)}
           />
         ) : null}
@@ -185,11 +204,13 @@ function GlobalSearchOverlay({
               ? "Settings"
               : h.tab === "trading"
                 ? "Trading"
-                : h.tab === "discovery"
-                  ? "Discovery"
-                  : h.tab === "secrets"
-                    ? "Secrets"
-                    : "Schedule";
+                : h.tab === "indicators"
+                  ? "Indicators"
+                  : h.tab === "optimize"
+                      ? "Optimize"
+                      : h.tab === "secrets"
+                        ? "Secrets"
+                        : "Schedule";
           return (
             <Box key={`${h.tab}-${h.rowId}`} marginBottom={1} flexDirection="row" flexWrap="wrap">
               <Button

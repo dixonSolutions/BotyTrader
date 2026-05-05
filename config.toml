@@ -33,6 +33,70 @@ sma_slow_period = 50
 rsi_period = 14
 sma_neutral_band = 0.001
 
+[indicators.sma]
+enabled = true
+weight = 0.15
+period = 50
+fast_period = 20
+
+[indicators.ema]
+enabled = true
+weight = 0.1
+fast_period = 12
+slow_period = 26
+
+[indicators.rsi]
+enabled = true
+weight = 0.12
+period = 14
+oversold = 30
+overbought = 70
+
+[indicators.macd]
+enabled = true
+weight = 0.1
+fast_period = 12
+slow_period = 26
+signal_period = 9
+
+[indicators.bollinger]
+enabled = true
+weight = 0.08
+period = 20
+std_dev = 2
+
+[indicators.stochastic]
+enabled = true
+weight = 0.08
+k_period = 14
+d_period = 3
+oversold = 20
+overbought = 80
+
+[indicators.atr]
+enabled = true
+weight = 0.05
+period = 14
+high_volatility_threshold = 0.05
+
+[indicators.obv]
+enabled = true
+weight = 0.12
+
+[indicators.fibonacci]
+enabled = true
+weight = 0.1
+levels = [ 0.236, 0.382, 0.5, 0.618, 0.786 ]
+proximity_threshold = 0.02
+
+[indicators.ichimoku]
+enabled = true
+weight = 0.1
+tenkan_period = 9
+kijun_period = 26
+senkou_b_period = 52
+displacement = 26
+
 [sentiment]
 provider = "local_finbert"
 model_id = "ProsusAI/finbert"
@@ -43,7 +107,6 @@ agent_interval_seconds = 300
 exit_monitor_interval_seconds = 30
 portfolio_cycle_seconds = 300
 candidate_cycle_seconds = 1_800
-discovery_cycle_seconds = 600
 
 [risk]
 max_position_pct = 10
@@ -55,7 +118,7 @@ take_profit_pct = 5
 symbols = [ "SPY", "QQQ" ]
 
 [autotrade]
-enabled = true
+enabled = false
 
 [features]
 memory_enabled = false
@@ -81,15 +144,20 @@ Rules:
 max_iterations = 8
 sentiment_weight = 0.35
 
-[discovery]
-enabled = false
-scan_interval_seconds = 14_400
-max_candidates = 20
-min_rank_score = 50
-max_new_positions = 3
-auto_invest = false
-invest_threshold = 0.4
-cooldown_hours = 48
-include_etfs = true
-include_tech = true
-news_query = "stocks earnings"
+[optimization]
+enabled = true
+schedule_day = "daily"
+schedule_hour = 2
+lookback_days = 14
+challenger_count = 50
+mutation_rate = 0.02
+learning_rate = 0.1
+improvement_threshold = 0.1
+max_single_weight = 0.3
+stress_test_enabled = true
+shadow_capture_range = 0.2
+exit_window_hours = 48
+challenger_swap_threshold = 10
+challenger_min_entry_score = 75
+min_snapshots = 10
+outcome_monitor_interval_minutes = 30

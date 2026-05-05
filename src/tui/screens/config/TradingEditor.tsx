@@ -8,6 +8,8 @@ import TextInput from "../../components/SafeTextInput.js";
 
 import { Button } from "../../components/Button.js";
 import { ClickableRow } from "../../components/ClickableRow.js";
+import { CheckboxGlyph } from "../../components/Toggle.js";
+import { Select } from "../../components/Select.js";
 import { Panel } from "../../components/Layout.js";
 import { icons } from "../../components/icons.js";
 import { theme } from "../../theme.js";
@@ -54,10 +56,10 @@ export function TradingEditor({
   void active;
 
   const rows: { id: RowId; label: string; value: string; desc?: string }[] = [
-    { id: "trading_enabled", label: "Trading engine", value: config.trading.enabled ? "ON" : "OFF" },
+    { id: "trading_enabled", label: "Trading engine", value: "" },
     { id: "trading_mode", label: "Paper / live (Alpaca)", value: config.trading.mode },
     { id: "db_path", label: "SQLite database path", value: config.trading.database_path },
-    { id: "simple_enabled", label: "Simple strategy", value: config.strategy.simple.enabled ? "ON" : "OFF" },
+    { id: "simple_enabled", label: "Simple strategy", value: "" },
     { id: "tech_w", label: "Technical weight (0-1)", value: String(config.strategy.simple.technical_weight) },
     { id: "sent_w", label: "Sentiment weight (0-1)", value: String(config.strategy.simple.sentiment_weight) },
     { id: "buy_th", label: "Buy threshold", value: String(config.strategy.simple.buy_threshold) },
@@ -77,6 +79,27 @@ export function TradingEditor({
     consumeRef.current?.();
   }, [focusRowId, rows]);
 
+  const TRADING_MODE_OPTIONS: readonly TradingMode[] = ["paper", "live"];
+  const SENT_PROVIDER_OPTIONS: readonly SentimentProvider[] = ["local_finbert", "disabled", "huggingface_api"];
+
+  function handleTradingModeChange(next: TradingMode): void {
+    setBusy(true);
+    try {
+      orchestrator.setTradingMode(next);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleSentProviderChange(next: SentimentProvider): void {
+    setBusy(true);
+    try {
+      orchestrator.setSentimentConfig({ provider: next });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function startEdit(i: number): void {
     const r = rows[i];
     if (!r) return;
@@ -94,27 +117,8 @@ export function TradingEditor({
       }
       return;
     }
-    if (r.id === "trading_mode") {
-      const next: TradingMode = config.trading.mode === "paper" ? "live" : "paper";
-      setBusy(true);
-      try {
-        orchestrator.setTradingMode(next);
-      } finally {
-        setBusy(false);
-      }
-      return;
-    }
-    if (r.id === "sent_provider") {
-      const order: SentimentProvider[] = ["local_finbert", "disabled", "huggingface_api"];
-      const i2 = (order.indexOf(config.sentiment.provider) + 1) % order.length;
-      setBusy(true);
-      try {
-        orchestrator.setSentimentConfig({ provider: order[i2]! });
-      } finally {
-        setBusy(false);
-      }
-      return;
-    }
+    // trading_mode and sent_provider are now handled via inline Select — skip
+    if (r.id === "trading_mode" || r.id === "sent_provider") return;
     setEditing(true);
     setEditingRow(r.id);
     setDraft(r.value);
@@ -206,10 +210,43 @@ export function TradingEditor({
               startEdit(i);
             }}
           >
-            <Text>
-              <Text color={i === selected ? theme.color.accent : theme.color.text}>{r.label.padEnd(28)}</Text>
-              <Text color={theme.color.muted}> {r.value}</Text>
-            </Text>
+            <Box flexDirection="row" flexWrap="nowrap" alignItems="flex-start" width="100%">
+              <Box minWidth={10} width="52%" maxWidth={44} flexShrink={1}>
+                <Text
+                  wrap="truncate-end"
+                  color={i === selected ? theme.color.accent : theme.color.text}
+                >
+                  {r.label}
+                </Text>
+              </Box>
+              <Box marginLeft={1} flexShrink={0} alignItems="flex-start">
+                {r.id === "trading_enabled" || r.id === "simple_enabled" ? (
+                  <CheckboxGlyph
+                    enabled={r.id === "trading_enabled" ? config.trading.enabled : config.strategy.simple.enabled}
+                  />
+                ) : r.id === "trading_mode" ? (
+                  <Select
+                    options={TRADING_MODE_OPTIONS}
+                    value={config.trading.mode}
+                    onChange={handleTradingModeChange}
+                    width={10}
+                    disabled={busy}
+                  />
+                ) : r.id === "sent_provider" ? (
+                  <Select
+                    options={SENT_PROVIDER_OPTIONS}
+                    value={config.sentiment.provider}
+                    onChange={handleSentProviderChange}
+                    width={22}
+                    disabled={busy}
+                  />
+                ) : (
+                  <Text color={theme.color.muted} wrap="truncate-end">
+                    {r.value}
+                  </Text>
+                )}
+              </Box>
+            </Box>
           </ClickableRow>
         ))}
         {editing ? (

@@ -5,7 +5,13 @@
 import { SECRET_DESCRIPTIONS, SecretsSchema, BrokerPlatformSchema } from "../../../config.js";
 import type { Orchestrator } from "../../../orchestrator.js";
 
-export type ConfigTabId = "settings" | "trading" | "discovery" | "secrets" | "schedule";
+export type ConfigTabId =
+  | "settings"
+  | "trading"
+  | "indicators"
+  | "optimize"
+  | "secrets"
+  | "schedule";
 
 export interface ConfigSearchHit {
   tab: ConfigTabId;
@@ -21,22 +27,12 @@ function settingsHits(config: Orchestrator["config"]): ConfigSearchHit[] {
   const rows: { rowId: string; label: string; valueHint: string; extra?: string }[] = [
     { rowId: "autotrade", label: "Autotrade", valueHint: String(config.autotrade.enabled) },
     {
-      rowId: "memory_enabled",
-      label: "Memory (RAG + HF writes)",
-      valueHint: String(config.features.memory_enabled),
-    },
-    {
-      rowId: "web_search_enabled",
-      label: "Web search (Brave tool)",
-      valueHint: String(config.features.web_search_enabled),
-    },
-    {
       rowId: "broker",
       label: "Broker platform",
       valueHint: config.broker.platform,
       extra: `Platforms: ${BROKER_OPTIONS.join(", ")}`,
     },
-    { rowId: "watchlist", label: "Watchlist (comma-separated)", valueHint: config.watchlist.symbols.join(", ") },
+    { rowId: "watchlist", label: "Symbols to trade (comma-separated)", valueHint: config.watchlist.symbols.join(", ") },
     { rowId: "max_position_pct", label: "Max position %", valueHint: String(config.risk.max_position_pct) },
     {
       rowId: "min_confidence_to_trade",
@@ -45,20 +41,6 @@ function settingsHits(config: Orchestrator["config"]): ConfigSearchHit[] {
     },
     { rowId: "stop_loss_pct", label: "Stop loss %", valueHint: String(config.risk.stop_loss_pct) },
     { rowId: "take_profit_pct", label: "Take profit %", valueHint: String(config.risk.take_profit_pct) },
-    { rowId: "embedding_model", label: "Embedding model", valueHint: config.gemini.embedding_model },
-    {
-      rowId: "active_model",
-      label: "Active local model",
-      valueHint: config.model.id || "(none)",
-    },
-    { rowId: "model_dtype", label: "Model dtype (quantisation)", valueHint: config.model.dtype },
-    { rowId: "model_device", label: "Inference device", valueHint: config.model.device },
-    {
-      rowId: "max_new_tokens",
-      label: "Max new tokens / turn",
-      valueHint: String(config.model.max_new_tokens),
-    },
-    { rowId: "hf_bucket", label: "HF bucket", valueHint: config.huggingface.bucket_name },
   ];
   return rows.map((r) => ({
     tab: "settings" as const,
@@ -103,12 +85,6 @@ function scheduleHits(config: Orchestrator["config"]): ConfigSearchHit[] {
   return [
     {
       tab: "schedule" as const,
-      rowId: "agent",
-      title: "Agent cycle interval (seconds)",
-      subtitle: `Current: ${config.schedule.agent_interval_seconds}s`,
-    },
-    {
-      tab: "schedule" as const,
       rowId: "exit",
       title: "Exit monitor interval (seconds)",
       subtitle: `Current: ${config.schedule.exit_monitor_interval_seconds}s`,
@@ -125,53 +101,119 @@ function scheduleHits(config: Orchestrator["config"]): ConfigSearchHit[] {
       title: "Candidate / watchlist cycle (seconds)",
       subtitle: `Current: ${config.schedule.candidate_cycle_seconds}s`,
     },
+  ];
+}
+
+function optimizationHits(config: Orchestrator["config"]): ConfigSearchHit[] {
+  const o = config.optimization ?? {};
+  return [
     {
-      tab: "schedule" as const,
-      rowId: "discovery",
-      title: "Discovery cycle (seconds)",
-      subtitle: `Current: ${config.schedule.discovery_cycle_seconds}s`,
+      tab: "optimize",
+      rowId: "lookback",
+      title: "Optimizer — lookback days",
+      subtitle: `Enabled: ${o.enabled ?? false} · lookback: ${o.lookback_days ?? 14}d`,
+    },
+    {
+      tab: "optimize",
+      rowId: "challengers",
+      title: "Optimizer — challenger count",
+      subtitle: `Current: ${o.challenger_count ?? 50}`,
+    },
+    {
+      tab: "optimize",
+      rowId: "learning_rate",
+      title: "Optimizer — learning rate α",
+      subtitle: `Current: ${o.learning_rate ?? 0.1}`,
+    },
+    {
+      tab: "optimize",
+      rowId: "schedule_day",
+      title: "Optimizer — schedule day",
+      subtitle: `Current: ${o.schedule_day ?? "daily"} @ hour ${o.schedule_hour ?? 2}`,
+    },
+    {
+      tab: "optimize",
+      rowId: "exit_window",
+      title: "Optimizer — snapshot outcome window (hours)",
+      subtitle: `Current: ${o.exit_window_hours ?? 48}`,
+    },
+    {
+      tab: "optimize",
+      rowId: "challenger_swap",
+      title: "Optimizer — challenger swap threshold (0–100)",
+      subtitle: `Current: ${o.challenger_swap_threshold ?? 10}`,
+    },
+    {
+      tab: "optimize",
+      rowId: "challenger_min_entry",
+      title: "Optimizer — challenger min entry score (0–100)",
+      subtitle: `Current: ${o.challenger_min_entry_score ?? 75}`,
     },
   ];
 }
 
-function discoveryHits(config: Orchestrator["config"]): ConfigSearchHit[] {
-  const d = config.discovery ?? {};
+function indicatorsHits(config: Orchestrator["config"]): ConfigSearchHit[] {
+  const ind = config.indicators;
   return [
     {
-      tab: "discovery",
-      rowId: "discovery_enabled",
-      title: "Discovery scanner",
-      subtitle: `Enabled: ${d.enabled ?? false}`,
+      tab: "indicators",
+      rowId: "sma",
+      title: "SMA — Simple Moving Average",
+      subtitle: `Weight: ${(ind.sma.weight * 100).toFixed(0)}% · ${ind.sma.enabled ? "Enabled" : "Disabled"} · Trend indicator`,
     },
     {
-      tab: "discovery",
-      rowId: "auto_invest",
-      title: "Auto-invest in discoveries",
-      subtitle: `Enabled: ${d.auto_invest ?? false} · Threshold: ${d.invest_threshold ?? 0.4}`,
+      tab: "indicators",
+      rowId: "ema",
+      title: "EMA — Exponential Moving Average",
+      subtitle: `Weight: ${(ind.ema.weight * 100).toFixed(0)}% · ${ind.ema.enabled ? "Enabled" : "Disabled"} · Trend indicator`,
     },
     {
-      tab: "discovery",
-      rowId: "scan_interval",
-      title: "Discovery scan interval",
-      subtitle: `Current: ${d.scan_interval_seconds ?? 14400}s (${((d.scan_interval_seconds ?? 14400) / 3600).toFixed(1)}h)`,
+      tab: "indicators",
+      rowId: "rsi",
+      title: "RSI — Relative Strength Index",
+      subtitle: `Weight: ${(ind.rsi.weight * 100).toFixed(0)}% · ${ind.rsi.enabled ? "Enabled" : "Disabled"} · Momentum oscillator`,
     },
     {
-      tab: "discovery",
-      rowId: "max_candidates",
-      title: "Max candidates per scan",
-      subtitle: `Current: ${d.max_candidates ?? 20}`,
+      tab: "indicators",
+      rowId: "macd",
+      title: "MACD — Moving Average Convergence Divergence",
+      subtitle: `Weight: ${(ind.macd.weight * 100).toFixed(0)}% · ${ind.macd.enabled ? "Enabled" : "Disabled"} · Momentum indicator`,
     },
     {
-      tab: "discovery",
-      rowId: "min_rank_score",
-      title: "Minimum rank score",
-      subtitle: `Current: ${d.min_rank_score ?? 50} (0-100)`,
+      tab: "indicators",
+      rowId: "bollinger",
+      title: "Bollinger Bands",
+      subtitle: `Weight: ${(ind.bollinger.weight * 100).toFixed(0)}% · ${ind.bollinger.enabled ? "Enabled" : "Disabled"} · Volatility bands`,
     },
     {
-      tab: "discovery",
-      rowId: "max_new_positions",
-      title: "Max new positions per scan",
-      subtitle: `Current: ${d.max_new_positions ?? 3}`,
+      tab: "indicators",
+      rowId: "stochastic",
+      title: "Stochastic Oscillator",
+      subtitle: `Weight: ${(ind.stochastic.weight * 100).toFixed(0)}% · ${ind.stochastic.enabled ? "Enabled" : "Disabled"} · Momentum indicator`,
+    },
+    {
+      tab: "indicators",
+      rowId: "atr",
+      title: "ATR — Average True Range",
+      subtitle: `Weight: ${(ind.atr.weight * 100).toFixed(0)}% · ${ind.atr.enabled ? "Enabled" : "Disabled"} · Volatility dampener`,
+    },
+    {
+      tab: "indicators",
+      rowId: "obv",
+      title: "OBV — On-Balance Volume",
+      subtitle: `Weight: ${(ind.obv.weight * 100).toFixed(0)}% · ${ind.obv.enabled ? "Enabled" : "Disabled"} · Volume indicator`,
+    },
+    {
+      tab: "indicators",
+      rowId: "fibonacci",
+      title: "Fibonacci Retracement",
+      subtitle: `Weight: ${(ind.fibonacci.weight * 100).toFixed(0)}% · ${ind.fibonacci.enabled ? "Enabled" : "Disabled"} · Support/resistance`,
+    },
+    {
+      tab: "indicators",
+      rowId: "ichimoku",
+      title: "Ichimoku Cloud",
+      subtitle: `Weight: ${(ind.ichimoku.weight * 100).toFixed(0)}% · ${ind.ichimoku.enabled ? "Enabled" : "Disabled"} · Complex trend`,
     },
   ];
 }
@@ -180,7 +222,8 @@ export function buildConfigSearchHits(orchestrator: Orchestrator): ConfigSearchH
   return [
     ...settingsHits(orchestrator.config),
     ...tradingHits(orchestrator.config),
-    ...discoveryHits(orchestrator.config),
+    ...indicatorsHits(orchestrator.config),
+    ...optimizationHits(orchestrator.config),
     ...secretsHits(),
     ...scheduleHits(orchestrator.config),
   ];

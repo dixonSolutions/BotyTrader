@@ -19,10 +19,13 @@ export interface TextInputProps {
   readonly value: string;
   readonly onChange: (value: string) => void;
   readonly onSubmit?: (value: string) => void;
+  /** e.g. close a popover without submitting */
+  readonly onEscape?: () => void;
 }
 
 function isStdinNoise(input: string): boolean {
   if (input.includes("\x1b[<")) return true;
+  /** Chunked SGR mouse without leading ESC in this read */
   if (/^\[<[\d;]+[Mm]$/.test(input)) return true;
   return false;
 }
@@ -36,6 +39,7 @@ export default function TextInput({
   showCursor = true,
   onChange,
   onSubmit,
+  onEscape,
 }: TextInputProps): React.ReactElement {
   const [state, setState] = useState({
     cursorOffset: (originalValue || "").length,
@@ -93,6 +97,10 @@ export default function TextInput({
         key.tab ||
         (key.shift && key.tab)
       ) {
+        return;
+      }
+      if (key.escape) {
+        onEscape?.();
         return;
       }
       if (key.return) {

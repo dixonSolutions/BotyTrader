@@ -1,5 +1,6 @@
 /**
- * Root Ink app — owns top-level routing between Home, Insights, Alpaca Search, and Config.
+ * Root Ink app — owns top-level routing between Home, Insights, Alpaca Search,
+ * Config, and Debugging.
  *
  * State subscription happens once here; child screens receive immutable
  * snapshots (Single Responsibility, predictable rendering).
@@ -12,17 +13,20 @@ import { AlpacaSearchScreen } from "./screens/AlpacaSearchScreen.js";
 import { Home, type HomeChoice } from "./screens/Home.js";
 import { Insights } from "./screens/insights/Insights.js";
 import { Config } from "./screens/config/Config.js";
-import { ModelsScreen } from "./screens/ModelsScreen.js";
+import { Debugging } from "./screens/debugging/Debugging.js";
 import type { Orchestrator, OrchestratorState } from "../orchestrator.js";
+import type { LogService } from "../services/logService.js";
 
 type Route = "home" | HomeChoice;
 
 interface Props {
   orchestrator: Orchestrator;
+  /** Real-time log bus — created at bootstrap and passed through for the Debugging screen. */
+  logService: LogService;
   initialRoute?: Route;
 }
 
-export function App({ orchestrator, initialRoute = "home" }: Props): React.ReactElement {
+export function App({ orchestrator, logService, initialRoute = "home" }: Props): React.ReactElement {
   const [route, setRoute] = useState<Route>(initialRoute);
   const [state, setState] = useState<OrchestratorState>(orchestrator.getState());
   const { exit } = useApp();
@@ -71,10 +75,15 @@ export function App({ orchestrator, initialRoute = "home" }: Props): React.React
     );
   }
 
-  if (route === "models") {
+  if (route === "debugging") {
     return (
       <Box flexDirection="column" flexGrow={1} minHeight={0}>
-        <ModelsScreen orchestrator={orchestrator} onBack={goHome} />
+        <Debugging
+          orchestrator={orchestrator}
+          state={state}
+          logService={logService}
+          onBack={goHome}
+        />
       </Box>
     );
   }

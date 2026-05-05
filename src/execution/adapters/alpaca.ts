@@ -8,6 +8,7 @@
 
 import type {
   AccountSummary,
+  AssetInfo,
   BrokerAdapter,
   NewsItem,
   NewsSearchOpts,
@@ -131,6 +132,63 @@ export class AlpacaAdapter implements BrokerAdapter {
       c: b.c,
       v: b.v,
     }));
+  }
+
+  async listAssets(opts?: { assetClass?: string }): Promise<AssetInfo[]> {
+    const params = new URLSearchParams({
+      status: "active",
+      asset_class: opts?.assetClass ?? "us_equity",
+      tradable: "true",
+    });
+    const raw = await this.request<AlpacaAsset[]>(
+      `${this.tradingBase}/assets?${params.toString()}`,
+    );
+    return raw
+      .filter((a) => a.tradable && a.status === "active" && /^[A-Z]{1,5}$/.test(a.symbol))
+      .map((a) => ({
+        symbol: a.symbol,
+        name: a.name,
+        tradable: a.tradable,
+        marginable: a.marginable,
+        fractionable: a.fractionable,
+      }));
+  }
+
+  /**
+   * Bulk multi-symbol OHLCV bars — batched in groups of 100 to stay within
+   * Alpaca's URL length limits. Uses the same IEX feed as getPriceHistory.
+   */
+  async getBulkBars(symbols: string[], days: number): Promise<Map<string, PriceBar[]>> {
+    const BATCH_SIZE = 100;
+    const result = new Map<string, PriceBar[]>();
+    const end = new Date();
+    const start = new Date(end.getTime() - days * 86_400_000);
+
+    for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
+      const batch = symbols.slice(i, i + BATCH_SIZE);
+      const params = new URLSearchParams({
+        symbols: batch.join(","),
+        timeframe: "1Day",
+        start: start.toISOString(),
+        end: end.toISOString(),
+        limit: "10000",
+        adjustment: "raw",
+        feed: "iex",
+        sort: "asc",
+      });
+      try {
+        const raw = await this.request<{ bars?: Record<string, AlpacaBar[]> }>(
+          `${DATA_BASE}/stocks/bars?${params.toString()}`,
+        );
+        for (const [sym, bars] of Object.entries(raw.bars ?? {})) {
+          result.set(sym.toUpperCase(), bars.map((b) => ({ t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v })));
+        }
+      } catch {
+        /* skip failed batch — non-fatal */
+      }
+    }
+
+    return result;
   }
 
   async getOrderBook(symbol: string, _depth = 1): Promise<OrderBookSnapshot> {
@@ -298,6 +356,15 @@ interface AlpacaNewsItem {
 interface AlpacaNewsResponse {
   news?: AlpacaNewsItem[];
   next_page_token?: string | null;
+}
+
+interface AlpacaAsset {
+  symbol: string;
+  name: string;
+  status: string;
+  tradable: boolean;
+  marginable: boolean;
+  fractionable: boolean;
 }
 
 function mapNewsItem(n: AlpacaNewsItem): NewsItem {

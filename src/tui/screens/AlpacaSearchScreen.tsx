@@ -69,8 +69,8 @@ export function AlpacaSearchScreen({ orchestrator, state, onBack }: Props): Reac
       <Box flexShrink={0}>
         <Footer
           hints={[
-            "Enter runs search; Symbols are scored with Tech + Sentiment weights from config",
-            "Wheel to scroll · Back returns Home",
+            "Enter runs search; table shows Sentiment, Technical, Final (weighted hybrid)",
+            "Double-click Technical for indicator breakdown · leave panel or Esc to close · Wheel · Back",
           ]}
         />
       </Box>

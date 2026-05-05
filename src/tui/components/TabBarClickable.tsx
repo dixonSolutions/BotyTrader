@@ -1,5 +1,9 @@
 /**
- * Clickable tab strip (e.g. Config sub-tabs). No keyboard shortcuts.
+ * Clickable tab strip — dark surface, underline-based active indicator.
+ *
+ * Inactive tab: muted gray. Active tab: white bold + underline. Divider below strip.
+ * (Stepped animation was removed: extra timers + re-renders amplified pointer load and
+ * contributed to sluggish / “stuck” UI with many `usePointerTarget` subscribers.)
  */
 
 import React, { useRef } from "react";
@@ -24,34 +28,32 @@ function TabPill<T extends string>({
   tab,
   active,
   onSelect,
-  isLast,
 }: {
   tab: TabItem<T>;
   active: boolean;
   onSelect: (id: T) => void;
-  isLast: boolean;
 }): React.ReactElement {
   const ref = useRef<DOMElement>(null);
   const { hover, ripple } = usePointerTarget(ref, { onPress: () => onSelect(tab.id) });
 
-  const bg = active
-    ? theme.ui.tabActiveBg
-    : ripple
-      ? "white"
-      : hover
-        ? theme.ui.buttonSecondaryBg
-        : theme.ui.tabInactiveBg;
+  const label = tab.icon ? `${tab.icon} ${tab.label}` : tab.label;
+  const paddedLabel = ` ${label} `;
+
+  if (active) {
+    return (
+      <Box ref={ref}>
+        <Text bold color={theme.ui.tabActiveFg} underline>
+          {paddedLabel}
+        </Text>
+      </Box>
+    );
+  }
+
+  const color = ripple ? "#FFFFFF" : hover ? "#ADADAD" : theme.ui.tabInactiveFg;
 
   return (
-    <Box ref={ref} marginRight={isLast ? 0 : 1}>
-      <Text
-        bold
-        backgroundColor={bg}
-        color={ripple && !active ? "black" : "white"}
-        underline={!active && hover && !ripple}
-      >
-        {` ${tab.icon ? `${tab.icon} ` : ""}${tab.label} `}
-      </Text>
+    <Box ref={ref}>
+      <Text color={color}>{paddedLabel}</Text>
     </Box>
   );
 }
@@ -62,10 +64,15 @@ export function TabBarClickable<T extends string>({
   onSelect,
 }: TabBarClickableProps<T>): React.ReactElement {
   return (
-    <Box marginBottom={1} flexWrap="wrap">
-      {tabs.map((t, i) => (
-        <TabPill key={t.id} tab={t} active={t.id === current} onSelect={onSelect} isLast={i === tabs.length - 1} />
-      ))}
+    <Box flexDirection="column">
+      <Box flexDirection="row">
+        {tabs.map((t) => (
+          <TabPill key={t.id} tab={t} active={t.id === current} onSelect={onSelect} />
+        ))}
+      </Box>
+      <Box>
+        <Text color={theme.ui.tabDividerColor}>{"─".repeat(60)}</Text>
+      </Box>
     </Box>
   );
 }

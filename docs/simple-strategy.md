@@ -167,8 +167,8 @@ Symbols currently monitored by the bot.
 |--------|---------|
 | `symbol` | Symbol being watched |
 | `status` | `watching`, `eligible`, `held`, `cooldown`, or `blocked` |
-| `source` | `manual`, `discovery`, or `position` |
-| `rank_score` | Optional discovery/ranking score |
+| `source` | Typically `config` (synced from `watchlist.symbols`) or `manual` |
+| `rank_score` | Optional ranking score when present |
 | `last_scanned_at` | Last broad scan or refresh |
 | `cooldown_until` | Re-entry block after exit |
 | `notes` | Human-readable reason/context |
@@ -207,32 +207,26 @@ Use a unique key on `(symbol, timeframe, timestamp)` so market data refreshes ca
 
 ## Cycles
 
-The bot should not scan the entire market every cycle. It should separate portfolio management, watchlist evaluation, and broad discovery.
+The bot does not scan the entire market. It evaluates **open positions** on the portfolio cycle and **symbols you list in `watchlist.symbols`** on the candidate cycle (at least one ticker is required in config).
 
 ```text
-Fast cycle:
+Portfolio cycle:
   manage held positions
   check exits, stops, take-profit, and sell signals
 
-Medium cycle:
-  refresh watchlist candidates
-  generate new signals for monitored symbols
-
-Slow cycle:
-  scan broad market
-  rank reasonable candidates
-  update watchlist
+Candidate cycle:
+  sync watchlist rows from config
+  generate new signals for each configured symbol
 ```
 
 Example schedule:
 
 | Cycle | Interval | Purpose |
 |-------|----------|---------|
-| Portfolio management | 5 minutes | Protect and manage existing positions |
-| Candidate evaluation | 30 minutes | Re-score watchlist candidates |
-| Broad discovery | 4 hours | Find new reasonable stocks to monitor |
+| Portfolio management | 5 minutes (typical) | Protect and manage existing positions |
+| Candidate evaluation | 30 minutes (typical) | Re-score every symbol in `watchlist.symbols` |
 
-Broad discovery should feed the `watchlist`; it should not bypass risk checks or buy directly.
+Signals and orders still must pass the same risk gates (`autotrade`, `min_confidence_to_trade`, sizing).
 
 ## Execution Policy
 

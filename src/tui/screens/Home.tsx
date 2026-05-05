@@ -15,7 +15,7 @@ import { Footer, Header, ScreenFrame } from "../components/Layout.js";
 import { icons } from "../components/icons.js";
 import { theme } from "../theme.js";
 
-export type HomeChoice = "config" | "insights" | "alpaca_search" | "models";
+export type HomeChoice = "config" | "insights" | "alpaca_search" | "debugging";
 
 interface Props {
   brokerName: string;
@@ -29,7 +29,7 @@ const ORDER: { id: HomeChoice; label: string; description: string; icon: string 
     id: "insights",
     label: "Insights",
     icon: icons.bullet,
-    description: "Dashboard — vitals, agent schedule & reasoning, performance, market, logs.",
+    description: "Dashboard — vitals, trading cycles, performance, market, logs.",
   },
   {
     id: "alpaca_search",
@@ -38,16 +38,16 @@ const ORDER: { id: HomeChoice; label: string; description: string; icon: string 
     description: "News from Alpaca Market Data — ticker, comma list, or keyword filter on recent headlines.",
   },
   {
-    id: "models",
-    label: "Models",
-    icon: icons.download,
-    description: "Download LLMs for intelligent trading — allocation, risk review, news analysis.",
-  },
-  {
     id: "config",
     label: "Config",
     icon: icons.bullet,
-    description: "Settings, trading, discovery, secrets, schedules — full configuration.",
+    description: "Settings, trading, indicators, optimizer, secrets, schedules — full configuration.",
+  },
+  {
+    id: "debugging",
+    label: "Debugging",
+    icon: icons.debug,
+    description: "Run trading or optimizer agents in isolation with real-time detailed logs.",
   },
 ];
 
@@ -87,7 +87,7 @@ export function Home({ brokerName, connected, onChoose, onQuit }: Props): React.
       <Box flexShrink={0}>
         <Footer
           hints={[
-            "Click a card — Insights, Alpaca Search (news), or Config",
+            "Click a card — Insights, Alpaca Search, Config, or Debugging",
             "Wheel scrolls the main pane when content is tall",
             "Click Quit to exit — typing stays for search fields in other screens",
           ]}

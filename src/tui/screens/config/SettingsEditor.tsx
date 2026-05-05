@@ -9,6 +9,8 @@ import TextInput from "../../components/SafeTextInput.js";
 
 import { Button } from "../../components/Button.js";
 import { ClickableRow } from "../../components/ClickableRow.js";
+import { CheckboxGlyph } from "../../components/Toggle.js";
+import { Select } from "../../components/Select.js";
 import { Panel } from "../../components/Layout.js";
 import { icons } from "../../components/icons.js";
 import { theme } from "../../theme.js";
@@ -16,7 +18,6 @@ import {
   writeConfig,
   type BrokerPlatform,
   BrokerPlatformSchema,
-  type Config,
 } from "../../../config.js";
 import type { Orchestrator } from "../../../orchestrator.js";
 
@@ -43,18 +44,6 @@ function buildFields(config: Orchestrator["config"]): Field[] {
   return [
     { id: "autotrade", label: "Autotrade", kind: "bool", value: String(config.autotrade.enabled) },
     {
-      id: "memory_enabled",
-      label: "Memory (RAG + HF writes)",
-      kind: "bool",
-      value: String(config.features.memory_enabled),
-    },
-    {
-      id: "web_search_enabled",
-      label: "Web search (Brave tool)",
-      kind: "bool",
-      value: String(config.features.web_search_enabled),
-    },
-    {
       id: "broker",
       label: "Broker platform",
       kind: "enum",
@@ -63,7 +52,7 @@ function buildFields(config: Orchestrator["config"]): Field[] {
     },
     {
       id: "watchlist",
-      label: "Watchlist (comma-separated)",
+      label: "Symbols to trade (comma-separated)",
       kind: "list",
       value: config.watchlist.symbols.join(", "),
     },
@@ -76,34 +65,6 @@ function buildFields(config: Orchestrator["config"]): Field[] {
     },
     { id: "stop_loss_pct", label: "Stop loss %", kind: "number", value: String(config.risk.stop_loss_pct) },
     { id: "take_profit_pct", label: "Take profit %", kind: "number", value: String(config.risk.take_profit_pct) },
-    { id: "embedding_model", label: "Embedding model", kind: "list", value: config.gemini.embedding_model },
-    {
-      id: "active_model",
-      label: "Active local model",
-      kind: "list",
-      value: config.model.id || "(none — enter a Hugging Face org/repo id)",
-    },
-    {
-      id: "model_dtype",
-      label: "Model dtype (quantisation)",
-      kind: "enum",
-      value: config.model.dtype,
-      options: ["auto", "fp32", "fp16", "q8", "q4", "q4f16"],
-    },
-    {
-      id: "model_device",
-      label: "Inference device",
-      kind: "enum",
-      value: config.model.device,
-      options: ["auto", "cpu", "wasm", "webgpu"],
-    },
-    {
-      id: "max_new_tokens",
-      label: "Max new tokens / turn",
-      kind: "number",
-      value: String(config.model.max_new_tokens),
-    },
-    { id: "hf_bucket", label: "HF bucket", kind: "list", value: config.huggingface.bucket_name },
   ];
 }
 
@@ -153,25 +114,19 @@ export function SettingsEditor({
     if (field.kind === "bool") {
       if (field.id === "autotrade") {
         orchestrator.setAutotrade(!config.autotrade.enabled);
-      } else if (field.id === "memory_enabled") {
-        orchestrator.setMemoryEnabled(!config.features.memory_enabled);
-      } else if (field.id === "web_search_enabled") {
-        orchestrator.setWebSearchEnabled(!config.features.web_search_enabled);
       }
     } else if (field.kind === "enum") {
-      const opts = field.options ?? [];
-      const next = opts[(opts.indexOf(field.value) + 1) % opts.length];
-      if (field.id === "broker") {
-        config.broker.platform = next as BrokerPlatform;
-      } else if (field.id === "model_dtype") {
-        config.model.dtype = next as Config["model"]["dtype"];
-      } else if (field.id === "model_device") {
-        config.model.device = next as Config["model"]["device"];
-      }
-      writeConfig(config);
+      // Enum fields are now handled by the inline Select component; nothing to do on row click.
     } else {
       setEditing(true);
       setDraft(field.value);
+    }
+  }
+
+  function handleEnumChange(field: Field, next: string): void {
+    if (field.id === "broker") {
+      config.broker.platform = next as BrokerPlatform;
+      writeConfig(config);
     }
   }
 
@@ -194,32 +149,6 @@ export function SettingsEditor({
         if (raw && Number.isFinite(n)) orchestrator.setRiskField(field.id, n);
         break;
       }
-      case "embedding_model":
-        if (raw) {
-          config.gemini.embedding_model = raw;
-          writeConfig(config);
-        }
-        break;
-      case "active_model":
-        if (raw) {
-          config.model.id = raw;
-          writeConfig(config);
-        }
-        break;
-      case "max_new_tokens": {
-        const n = Math.floor(Number(raw));
-        if (raw && Number.isFinite(n) && n > 0) {
-          config.model.max_new_tokens = n;
-          writeConfig(config);
-        }
-        break;
-      }
-      case "hf_bucket":
-        if (raw) {
-          config.huggingface.bucket_name = raw;
-          writeConfig(config);
-        }
-        break;
     }
   }
 
@@ -260,12 +189,32 @@ export function SettingsEditor({
               handleActivate(field);
             }}
           >
-            <Text>
-              <Text color={i === selectedVisibleIdx ? theme.color.accent : theme.color.text}>
-                {field.label.padEnd(36)}
-              </Text>
-              <Text color={valueColor(field)}> {displayValue(field)}</Text>
-            </Text>
+            <Box flexDirection="row" flexWrap="nowrap" alignItems="flex-start" width="100%">
+              <Box minWidth={12} width="55%" maxWidth={46} flexShrink={1}>
+                <Text
+                  wrap="truncate-end"
+                  color={i === selectedVisibleIdx ? theme.color.accent : theme.color.text}
+                >
+                  {field.label}
+                </Text>
+              </Box>
+              <Box marginLeft={1} flexShrink={0}>
+                {field.kind === "bool" ? (
+                  <CheckboxGlyph enabled={field.value === "true"} />
+                ) : field.kind === "enum" ? (
+                  <Select
+                    options={(field.options ?? []) as readonly string[]}
+                    value={field.value}
+                    onChange={(next) => handleEnumChange(field, next)}
+                    width={20}
+                  />
+                ) : (
+                  <Text color={valueColor(field)} wrap="truncate-end">
+                    {displayValue(field)}
+                  </Text>
+                )}
+              </Box>
+            </Box>
           </ClickableRow>
         ))
       )}

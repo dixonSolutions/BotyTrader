@@ -75,10 +75,17 @@ function signalToItem(s: SignalRow, timeW: number, symW: number): SignalItem {
 interface Props {
   signals: SignalRow[];
   dbOpenError: string | null;
+  /** Resolved absolute path from config (shown when DB fails to open). */
+  databasePath?: string;
   viewportRows: number;
 }
 
-export function TradingSignalsTable({ signals, dbOpenError, viewportRows }: Props): React.ReactElement {
+export function TradingSignalsTable({
+  signals,
+  dbOpenError,
+  databasePath,
+  viewportRows,
+}: Props): React.ReactElement {
   const { stdout } = useStdout();
   const mouse = useMouse();
   const cols = stdout.columns ?? 80;
@@ -185,7 +192,17 @@ export function TradingSignalsTable({ signals, dbOpenError, viewportRows }: Prop
   }
 
   const hint = dbOpenError ? (
-    <Text color={theme.color.danger}>Database unavailable — signals not loaded.</Text>
+    <Box flexDirection="column">
+      <Text color={theme.color.danger}>Database unavailable — signals not loaded.</Text>
+      <Text color={theme.color.danger} wrap="wrap">
+        {dbOpenError}
+      </Text>
+      {databasePath ? (
+        <Text color={theme.color.muted} wrap="wrap">
+          Path: {databasePath}
+        </Text>
+      ) : null}
+    </Box>
   ) : signals.length === 0 ? (
     <Text dimColor>No signals recorded yet (run trading cycles with DB open).</Text>
   ) : null;

@@ -11,6 +11,8 @@ export const icons = {
   play: "▶",
   pause: "⏸",
   refresh: "↻",
+  reset: "↺",
+  edit: "✎",
   plus: "+",
   minus: "−",
   chevronUp: "▲",
@@ -18,6 +20,8 @@ export const icons = {
   check: "✓",
   download: "↓",
   bullet: "●",
+  debug: "⚙",
+  stop: "■",
 } as const;
 
 export type IconName = keyof typeof icons;

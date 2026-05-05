@@ -11,13 +11,15 @@ import { Button } from "../../components/Button.js";
 import { Panel, StatRow } from "../../components/Layout.js";
 import { ScrollRegion } from "../../components/ScrollRegion.js";
 import { AppTable, type AppTableRow } from "../../components/AppTable.js";
+import { AlpacaScoredSymbolsBlock } from "./AlpacaScoredSymbolsBlock.js";
 import { ProgressBar } from "../../components/ProgressBar.js";
 import { useMouse } from "@zenobius/ink-mouse";
 import { icons } from "../../components/icons.js";
 import { theme } from "../../theme.js";
 import type { NewsItem } from "../../../execution/broker.js";
 import type { Orchestrator } from "../../../orchestrator.js";
-import type { DiscoveryCandidate } from "../../../trading/discovery/scanner.js";
+import type { AlpacaSearchScoredSymbol } from "../../../trading/types.js";
+import { buildAlpacaNewsSearchScoredSymbol } from "../../../trading/display/alpacaNewsSearchCandidate.js";
 
 interface Props {
   orchestrator: Orchestrator;
@@ -27,40 +29,9 @@ interface Props {
 
 interface SearchResult {
   news: NewsItem[];
-  candidates: DiscoveryCandidate[];
+  candidates: AlpacaSearchScoredSymbol[];
   totalAvailable: number;
   nextPageToken?: string | null;
-}
-
-/** Format score with sign and fixed decimals */
-function fmtScore(n: number): string {
-  const sign = n >= 0 ? "+" : "";
-  return `${sign}${n.toFixed(2)}`;
-}
-
-/** Format hybrid action indicator */
-function actionIndicator(hybrid: number): string {
-  if (hybrid > 0.5) return "▲ BUY";
-  if (hybrid < -0.3) return "▼ SELL";
-  return "◆ HOLD";
-}
-
-/** Build symbols table data */
-function buildSymbolsTableData(candidates: DiscoveryCandidate[]): { rows: AppTableRow[]; columns: string[] } {
-  const columns = ["Symbol", "Price", "Tech", "Sent", "Hybrid", "Action", "Rank", "News"];
-
-  const rows: AppTableRow[] = candidates.map((c) => ({
-    Symbol: c.symbol,
-    Price: `$${c.price.toFixed(2)}`,
-    Tech: fmtScore(c.technicalScore),
-    Sent: fmtScore(c.sentimentScore),
-    Hybrid: fmtScore(c.hybridScore),
-    Action: actionIndicator(c.hybridScore),
-    Rank: c.rankScore.toFixed(0),
-    News: String(c.newsCount),
-  }));
-
-  return { rows, columns };
 }
 
 /** Build news table data for visible items only */
@@ -119,14 +90,15 @@ export function AlpacaSearchPanel({
   // Scoring state
   const [scoringProgress, setScoringProgress] = useState({ current: 0, total: 0 });
   const [pendingSymbols, setPendingSymbols] = useState<string[]>([]);
-  const [scoredCandidates, setScoredCandidates] = useState<DiscoveryCandidate[]>([]);
+  const [scoredCandidates, setScoredCandidates] = useState<AlpacaSearchScoredSymbol[]>([]);
 
   const searchWidth = Math.min(72, Math.max(36, cols - 8));
 
   // Get strategy weights from config
   const config = orchestrator.config;
-  const techWeight = config.strategy.simple.technical_weight;
-  const sentWeight = config.strategy.simple.sentiment_weight;
+  const simple = config.strategy.simple;
+  const techWeight = simple.technical_weight;
+  const sentWeight = simple.sentiment_weight;
 
   // Calculate visible items based on terminal height
   const visibleNewsRows = Math.max(5, Math.min(NEWS_BATCH_SIZE, Math.floor(rows * 0.3)));
@@ -152,7 +124,7 @@ export function AlpacaSearchPanel({
 
       const broker = orchestrator.broker;
       const batch = symbols.slice(startIdx, startIdx + SYMBOLS_BATCH_SIZE);
-      const newCandidates: DiscoveryCandidate[] = [];
+      const newCandidates: AlpacaSearchScoredSymbol[] = [];
 
       for (const symbol of batch) {
         try {
@@ -162,6 +134,7 @@ export function AlpacaSearchPanel({
           if (bars.length < 55) continue;
 
           const closes = bars.map((b) => b.c);
+          const ohlcBars = bars.map((b) => ({ o: b.o, h: b.h, l: b.l, c: b.c, v: b.v }));
 
           let symbolNews: NewsItem[] = [];
           if (broker.getNews) {
@@ -183,30 +156,18 @@ export function AlpacaSearchPanel({
             newsItemsForSymbol(symbolNews),
           );
 
-          const strat = computeSimpleStrategy(config, { closes, sentimentScore });
+          const strat = computeSimpleStrategy(config, { bars: ohlcBars, sentimentScore });
 
-          const momentum = strat.smaFast && strat.smaSlow
-            ? (strat.smaFast - strat.smaSlow) / strat.smaSlow
-            : 0;
-          const newsBoost = Math.min(symbolNews.length / 5, 1) * 10;
-          const momentumBoost = momentum > 0 ? momentum * 20 : 0;
-          const rankScore = ((strat.hybridScore + 1) / 2) * 70 + newsBoost + momentumBoost;
-
-          newCandidates.push({
-            symbol: symbol.toUpperCase(),
-            source: "news",
-            technicalScore: strat.technicalScore,
-            sentimentScore,
-            hybridScore: strat.hybridScore,
-            price: closes[closes.length - 1] ?? 0,
-            volume24h: bars[bars.length - 1]?.v ?? 0,
-            newsCount: symbolNews.length,
-            smaFast: strat.smaFast,
-            smaSlow: strat.smaSlow,
-            rsi: strat.rsiValue,
-            rankScore: Math.max(0, Math.min(100, rankScore)),
-            reason: `tech=${strat.technicalScore.toFixed(2)} sent=${sentimentScore.toFixed(2)}`,
-          });
+          newCandidates.push(
+            buildAlpacaNewsSearchScoredSymbol({
+              symbol,
+              strat,
+              sentimentScore,
+              price: closes[closes.length - 1] ?? 0,
+              volume24h: bars[bars.length - 1]?.v ?? 0,
+              newsCount: symbolNews.length,
+            }),
+          );
         } catch {
           // Skip failed symbols
         }
@@ -303,12 +264,6 @@ export function AlpacaSearchPanel({
     [orchestrator, connected, visibleNewsRows, scoreSymbolsBatch],
   );
 
-  // Build table data
-  const symbolsTable = useMemo(() => {
-    if (!scoredCandidates.length) return null;
-    return buildSymbolsTableData(scoredCandidates);
-  }, [scoredCandidates]);
-
   const newsTable = useMemo(() => {
     if (!results?.news.length) return null;
     return buildNewsTableData(results.news, 0, visibleNewsCount, Math.max(48, cols - 4));
@@ -333,7 +288,8 @@ export function AlpacaSearchPanel({
   return (
     <Panel title={showPanelHeading ? "Alpaca Search + Scoring" : undefined}>
       <Text color={theme.color.muted}>
-        Search news with lazy loading. Scores use Tech ({(techWeight * 100).toFixed(0)}%) + Sent ({(sentWeight * 100).toFixed(0)}%) weights.
+        Search news with lazy loading. Final score = Tech ({(techWeight * 100).toFixed(0)}%) × technical + Sent (
+        {(sentWeight * 100).toFixed(0)}%) × sentiment.
       </Text>
 
       <Box marginTop={1} flexDirection="column">
@@ -400,27 +356,20 @@ export function AlpacaSearchPanel({
           </Box>
 
           {/* Scored Symbols Table */}
-          {symbolsTable && (
+          {scoredCandidates.length > 0 ? (
             <Box marginBottom={2} flexDirection="column">
-              <Text bold color={theme.color.primary}>Scored Symbols</Text>
-              <Text color={theme.color.muted}>
-                Tech {(techWeight * 100).toFixed(0)}% · Sent {(sentWeight * 100).toFixed(0)}% · {" "}
-                <Text color={theme.color.success}>+Pos</Text> ·{" "}
-                <Text color={theme.color.warn}>~Neu</Text> ·{" "}
-                <Text color={theme.color.danger}>-Neg</Text>
-              </Text>
-
-              <Box marginTop={1}>
-                <ScrollRegion>
-                  <AppTable
-                    data={symbolsTable.rows}
-                    columns={symbolsTable.columns}
-                    padding={1}
-                  />
-                </ScrollRegion>
-              </Box>
+              <ScrollRegion>
+                <AlpacaScoredSymbolsBlock
+                  candidates={scoredCandidates}
+                  mouse={mouse}
+                  techWeightPct={techWeight * 100}
+                  sentWeightPct={sentWeight * 100}
+                  buyThreshold={simple.buy_threshold}
+                  sellThreshold={simple.sell_threshold}
+                />
+              </ScrollRegion>
             </Box>
-          )}
+          ) : null}
 
           {/* News Articles - Lazy Loaded */}
           {newsTable && (

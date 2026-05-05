@@ -1,5 +1,5 @@
 /**
- * RecentAgentActions — compact card showing latest agent trading decisions.
+ * RecentTradingSignals — compact card showing latest trading signals.
  * Uses ink-virtual-list for performance on large signal histories.
  * Displays action type, symbol, timestamp, technical/sentiment/final scores.
  */
@@ -78,7 +78,7 @@ interface Props {
   viewportRows: number;
 }
 
-export function RecentAgentActions({ signals, viewportRows }: Props): React.ReactElement {
+export function RecentTradingSignals({ signals, viewportRows }: Props): React.ReactElement {
   const { stdout } = useStdout();
   const mouse = useMouse();
   const cols = stdout.columns ?? 80;
@@ -136,7 +136,7 @@ export function RecentAgentActions({ signals, viewportRows }: Props): React.Reac
       <Box flexDirection="column">
         <Box marginLeft={1} marginBottom={1}>
           <Text bold color={theme.color.primary}>
-            Recent agent actions
+            Recent trading signals
           </Text>
         </Box>
         <Text bold color={theme.color.muted}>

@@ -22,11 +22,9 @@ interface Props {
 }
 
 const FIELDS = [
-  { id: "agent", label: "Agent cycle interval (seconds)" },
   { id: "exit", label: "Exit monitor interval (seconds)" },
   { id: "portfolio", label: "Portfolio trading cycle (seconds)" },
   { id: "candidate", label: "Watchlist / candidate cycle (seconds)" },
-  { id: "discovery", label: "Discovery cycle (seconds)" },
 ] as const;
 
 type FieldId = (typeof FIELDS)[number]["id"];
@@ -85,17 +83,13 @@ export function ScheduleEditor({
     setEditing(false);
     setDraft("");
     if (!Number.isFinite(n) || n < 1) return;
-    if (field.id === "agent") {
-      orchestrator.setAgentInterval(n);
-    } else if (field.id === "exit") {
+    if (field.id === "exit") {
       config.schedule.exit_monitor_interval_seconds = Math.floor(n);
       writeConfig(config);
     } else if (field.id === "portfolio") {
       orchestrator.setTradingCycleInterval("portfolio", n);
     } else if (field.id === "candidate") {
       orchestrator.setTradingCycleInterval("candidate", n);
-    } else {
-      orchestrator.setTradingCycleInterval("discovery", n);
     }
   }
 
@@ -135,12 +129,19 @@ export function ScheduleEditor({
               startEdit(i);
             }}
           >
-            <Text>
-              <Text color={i === selectedIdx ? theme.color.accent : theme.color.text}>
-                {field.label.padEnd(36)}
-              </Text>
-              <Text> {currentValue(field.id, config)}s</Text>
-            </Text>
+            <Box flexDirection="row" flexWrap="nowrap" alignItems="flex-start" width="100%">
+              <Box minWidth={12} width="55%" maxWidth={46} flexShrink={1}>
+                <Text
+                  wrap="truncate-end"
+                  color={i === selectedIdx ? theme.color.accent : theme.color.text}
+                >
+                  {field.label}
+                </Text>
+              </Box>
+              <Box marginLeft={1} flexShrink={0}>
+                <Text wrap="truncate-end">{currentValue(field.id, config)}</Text>
+              </Box>
+            </Box>
           </ClickableRow>
         ))
       )}
@@ -161,7 +162,6 @@ export function ScheduleEditor({
       )}
       <Box marginTop={1} flexDirection="column">
         <StatRow label="Status" value={orchestrator.getState().status} />
-        <StatRow label="Last cycle" value={orchestrator.getState().lastCycleAt ?? "—"} />
       </Box>
     </Panel>
   );
@@ -169,18 +169,11 @@ export function ScheduleEditor({
 
 function currentValue(field: FieldId, config: Orchestrator["config"]): number {
   switch (field) {
-    case "agent":
-      return config.schedule.agent_interval_seconds;
     case "exit":
       return config.schedule.exit_monitor_interval_seconds;
     case "portfolio":
       return config.schedule.portfolio_cycle_seconds;
     case "candidate":
       return config.schedule.candidate_cycle_seconds;
-    case "discovery":
-      // Use new discovery config if enabled, otherwise fall back to schedule
-      return config.discovery?.enabled
-        ? (config.discovery.scan_interval_seconds ?? config.schedule.discovery_cycle_seconds)
-        : config.schedule.discovery_cycle_seconds;
   }
 }

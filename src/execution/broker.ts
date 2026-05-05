@@ -71,6 +71,15 @@ export interface NewsSearchOpts {
   maxArticles?: number;
 }
 
+/** Tradeable asset metadata returned by {@link BrokerAdapter.listAssets}. */
+export interface AssetInfo {
+  symbol: string;
+  name: string;
+  tradable: boolean;
+  marginable: boolean;
+  fractionable: boolean;
+}
+
 export interface BrokerAdapter {
   /** Display name surfaced to the TUI / logs (e.g. "Alpaca (paper)"). */
   readonly name: string;
@@ -108,6 +117,17 @@ export interface BrokerAdapter {
    * synthesise a single-level book from L1 quotes when full L2 isn't available.
    */
   getOrderBook?(symbol: string, depth?: number): Promise<OrderBookSnapshot>;
+
+  /**
+   * Optional — list all active tradeable assets for a given class (e.g. broker catalog).
+   */
+  listAssets?(opts?: { assetClass?: string }): Promise<AssetInfo[]>;
+
+  /**
+   * Optional — fetch OHLCV bars for multiple symbols in batched API calls.
+   * Returns a map of UPPER-CASE symbol → bars array (may omit symbols with no data).
+   */
+  getBulkBars?(symbols: string[], days: number): Promise<Map<string, PriceBar[]>>;
 }
 
 export interface OrderBookLevel {

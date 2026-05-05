@@ -40,16 +40,16 @@ interface CliOptions {
 
 async function runTui(root: string): Promise<void> {
   process.chdir(root);
-  const { config, secrets } = loadRuntime(root);
+  const { config, secrets, logService } = loadRuntime(root);
 
   if (secrets.ok) {
-    const orchestrator = await bootstrapOrchestrator(config, secrets.secrets);
+    const orchestrator = await bootstrapOrchestrator(config, secrets.secrets, logService);
     render(
       <MouseProvider>
         <AlternateScreen />
         <KeepStdinRaw />
         <ViewportRoot>
-          <App orchestrator={orchestrator} />
+          <App orchestrator={orchestrator} logService={logService} />
         </ViewportRoot>
       </MouseProvider>,
     );

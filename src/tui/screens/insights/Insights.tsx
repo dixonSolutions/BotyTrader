@@ -15,11 +15,12 @@ import { Footer, Header, ScreenFrame } from "../../components/Layout.js";
 import { icons } from "../../components/icons.js";
 import { theme } from "../../theme.js";
 import { AgentActivity } from "./AgentActivity.js";
+import { OptimizerActivity } from "./OptimizerActivity.js";
 import { HoldingsCompactTable } from "./HoldingsCompactTable.js";
 import { InsightsHeadTable } from "./InsightsHeadTable.js";
 import { MarketContext } from "./MarketContext.js";
 import { Performance } from "./Performance.js";
-import { RecentAgentActions } from "./RecentAgentActions.js";
+import { RecentTradingSignals } from "./RecentTradingSignals.js";
 import { SystemLogs } from "./SystemLogs.js";
 import { TradingSignalsTable } from "./TradingSignalsTable.js";
 import { VitalSigns } from "./VitalSigns.js";
@@ -153,12 +154,6 @@ export function Insights({ orchestrator, state, onBack }: Props): React.ReactEle
           <Box flexDirection="column" paddingX={1} paddingBottom={1}>
             <InsightsHeadTable state={state} />
 
-            {!orchestrator.models.activeId ? (
-              <Text color={theme.color.danger}>
-                No reasoning LLM — <Text bold>Config</Text> → <Text bold>Settings</Text> → Active local model.
-              </Text>
-            ) : null}
-
             <Box flexDirection="row" flexWrap="wrap" alignItems="center" marginTop={1} marginBottom={0}>
               <Text color={theme.color.muted}>Watchlist </Text>
               <Button
@@ -214,7 +209,7 @@ export function Insights({ orchestrator, state, onBack }: Props): React.ReactEle
             </Box>
 
             {/* Recent Agent Actions Card */}
-            <RecentAgentActions
+            <RecentTradingSignals
               signals={state.recentTradingSignals}
               viewportRows={AGENT_ACTIONS_VIEWPORT}
             />
@@ -236,6 +231,7 @@ export function Insights({ orchestrator, state, onBack }: Props): React.ReactEle
               <TradingSignalsTable
                 signals={state.recentTradingSignals}
                 dbOpenError={state.trading.dbOpenError}
+                databasePath={state.trading.dbPath}
                 viewportRows={SIGNALS_VIEWPORT}
               />
             </Box>
@@ -298,6 +294,10 @@ export function Insights({ orchestrator, state, onBack }: Props): React.ReactEle
               </Box>
 
               <Box marginTop={1}>
+                <OptimizerActivity state={state} />
+              </Box>
+
+              <Box marginTop={1}>
                 <SystemLogs
                   logs={state.logs}
                   scrollOffset={logScrollOffset}
@@ -315,7 +315,7 @@ export function Insights({ orchestrator, state, onBack }: Props): React.ReactEle
                 </Box>
                 <Box marginBottom={1}>
                   <Text color={theme.color.muted}>
-                    Manual triggers for testing agent cycles and discovery
+                    Manual triggers for testing agent cycles and the trading engine
                   </Text>
                 </Box>
 
@@ -339,15 +339,6 @@ export function Insights({ orchestrator, state, onBack }: Props): React.ReactEle
                   />
                   <Text> </Text>
                   <Button
-                    label="Run discovery now"
-                    icon={icons.search}
-                    onClick={() => void orchestrator.tradingEngine.checkAndRunAutoDiscovery()}
-                    disabled={!orchestrator.config.discovery?.enabled}
-                    variant="secondary"
-                    minWidth={18}
-                  />
-                  <Text> </Text>
-                  <Button
                     label={state.status === "paused" ? "Resume" : "Pause"}
                     icon={icons.pause}
                     onClick={() => orchestrator.togglePause()}
@@ -355,18 +346,6 @@ export function Insights({ orchestrator, state, onBack }: Props): React.ReactEle
                     minWidth={10}
                   />
                 </Box>
-
-                {state.agentLive && (
-                  <Box marginTop={1} flexDirection="column">
-                    <Text color={theme.color.primary}>Agent Active:</Text>
-                    <Text color={theme.color.text}>
-                      {state.agentLive.symbol} — {state.agentLive.phase}
-                    </Text>
-                    {state.agentLive.detail && (
-                      <Text color={theme.color.muted}>{state.agentLive.detail}</Text>
-                    )}
-                  </Box>
-                )}
 
                 {orchestrator.tradingEngine.getStatus().lastError && (
                   <Box marginTop={1}>

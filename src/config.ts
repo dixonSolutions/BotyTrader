@@ -135,6 +135,108 @@ export const ConfigSchema = z.object({
         .default({}),
     })
     .default({}),
+  /**
+   * Technical indicator configuration — 10 indicators with configurable weights.
+   * Each indicator can be enabled/disabled and has adjustable parameters.
+   */
+  indicators: z
+    .object({
+      /** Simple Moving Average — trend following indicator */
+      sma: z
+        .object({
+          enabled: z.boolean().default(true),
+          weight: z.number().min(0).max(1).default(0.15),
+          period: z.number().int().positive().default(50),
+          fast_period: z.number().int().positive().default(20),
+        })
+        .default({}),
+      /** Exponential Moving Average — faster-reacting trend indicator */
+      ema: z
+        .object({
+          enabled: z.boolean().default(true),
+          weight: z.number().min(0).max(1).default(0.10),
+          fast_period: z.number().int().positive().default(12),
+          slow_period: z.number().int().positive().default(26),
+        })
+        .default({}),
+      /** Relative Strength Index — momentum oscillator (0-100) */
+      rsi: z
+        .object({
+          enabled: z.boolean().default(true),
+          weight: z.number().min(0).max(1).default(0.12),
+          period: z.number().int().positive().default(14),
+          oversold: z.number().min(0).max(100).default(30),
+          overbought: z.number().min(0).max(100).default(70),
+        })
+        .default({}),
+      /** MACD — Moving Average Convergence Divergence */
+      macd: z
+        .object({
+          enabled: z.boolean().default(true),
+          weight: z.number().min(0).max(1).default(0.10),
+          fast_period: z.number().int().positive().default(12),
+          slow_period: z.number().int().positive().default(26),
+          signal_period: z.number().int().positive().default(9),
+        })
+        .default({}),
+      /** Bollinger Bands — volatility-based support/resistance */
+      bollinger: z
+        .object({
+          enabled: z.boolean().default(true),
+          weight: z.number().min(0).max(1).default(0.08),
+          period: z.number().int().positive().default(20),
+          std_dev: z.number().positive().default(2.0),
+        })
+        .default({}),
+      /** Stochastic Oscillator — momentum indicator comparing close to range */
+      stochastic: z
+        .object({
+          enabled: z.boolean().default(true),
+          weight: z.number().min(0).max(1).default(0.08),
+          k_period: z.number().int().positive().default(14),
+          d_period: z.number().int().positive().default(3),
+          oversold: z.number().min(0).max(100).default(20),
+          overbought: z.number().min(0).max(100).default(80),
+        })
+        .default({}),
+      /** Average True Range — volatility measurement (used as dampener) */
+      atr: z
+        .object({
+          enabled: z.boolean().default(true),
+          weight: z.number().min(0).max(1).default(0.05),
+          period: z.number().int().positive().default(14),
+          high_volatility_threshold: z.number().positive().default(0.05),
+        })
+        .default({}),
+      /** On-Balance Volume — volume flow indicator */
+      obv: z
+        .object({
+          enabled: z.boolean().default(true),
+          weight: z.number().min(0).max(1).default(0.12),
+        })
+        .default({}),
+      /** Fibonacci Retracement — support/resistance levels */
+      fibonacci: z
+        .object({
+          enabled: z.boolean().default(true),
+          weight: z.number().min(0).max(1).default(0.10),
+          levels: z.array(z.number().min(0).max(1)).default([0.236, 0.382, 0.5, 0.618, 0.786]),
+          proximity_threshold: z.number().min(0).max(0.1).default(0.02),
+        })
+        .default({}),
+      /** Ichimoku Cloud — comprehensive trend/support/resistance */
+      ichimoku: z
+        .object({
+          enabled: z.boolean().default(true),
+          weight: z.number().min(0).max(1).default(0.10),
+          tenkan_period: z.number().int().positive().default(9),
+          kijun_period: z.number().int().positive().default(26),
+          senkou_b_period: z.number().int().positive().default(52),
+          displacement: z.number().int().positive().default(26),
+        })
+        .default({}),
+    })
+    .default({}),
   sentiment: z
     .object({
       provider: SentimentProviderSchema.default("local_finbert"),
@@ -152,7 +254,6 @@ export const ConfigSchema = z.object({
     exit_monitor_interval_seconds: z.number().int().positive().default(30),
     portfolio_cycle_seconds: z.number().int().positive().default(300),
     candidate_cycle_seconds: z.number().int().positive().default(1800),
-    discovery_cycle_seconds: z.number().int().positive().default(14_400),
   }),
   risk: z.object({
     max_position_pct: z.number().nonnegative().default(10),
@@ -160,8 +261,20 @@ export const ConfigSchema = z.object({
     stop_loss_pct: z.number().nonnegative().default(2),
     take_profit_pct: z.number().nonnegative().default(5),
   }),
+  /**
+   * Symbols the simple strategy evaluates on the candidate cycle — at least one
+   * non-empty ticker is required when this config loads.
+   */
   watchlist: z.object({
-    symbols: z.array(z.string().min(1)).default([]),
+    symbols: z
+      .array(z.string())
+      .default([])
+      .transform((symbols) =>
+        Array.from(
+          new Set(symbols.map((s) => String(s).trim().toUpperCase()).filter((x) => x.length > 0)),
+        ),
+      )
+      .pipe(z.array(z.string().min(1)).min(1, "watchlist.symbols must list at least one stock ticker")),
   }),
   autotrade: z.object({
     enabled: z.boolean().default(false),
@@ -187,30 +300,51 @@ export const ConfigSchema = z.object({
       sentiment_weight: z.number().min(0).max(1).default(0.35),
     })
     .default({}),
-  /** Discovery scanner — finds and ranks new stocks beyond the watchlist. */
-  discovery: z
+  /**
+   * Autonomous optimizer — feature snapshots, walk-forward challengers, learning-rate config updates.
+   */
+  optimization: z
     .object({
       enabled: z.boolean().default(false),
-      /** How often to scan for new stocks (in seconds). Default: 4 hours. */
-      scan_interval_seconds: z.number().int().positive().default(14_400),
-      /** Max candidates to evaluate per scan. */
-      max_candidates: z.number().int().positive().default(20),
-      /** Min rank score (0-100) to be considered for investment. */
-      min_rank_score: z.number().min(0).max(100).default(50),
-      /** Max new positions to open from a single discovery scan. */
-      max_new_positions: z.number().int().min(0).default(3),
-      /** Enable auto-invest in discovered stocks. */
-      auto_invest: z.boolean().default(false),
-      /** Hybrid score threshold for auto-investment (default: 0.4). */
-      invest_threshold: z.number().min(-1).max(1).default(0.4),
-      /** Hours before a symbol can be rediscovered. */
-      cooldown_hours: z.number().int().positive().default(48),
-      /** Include popular ETFs in discovery scan. */
-      include_etfs: z.boolean().default(true),
-      /** Include tech stocks in discovery scan. */
-      include_tech: z.boolean().default(true),
-      /** News query for discovery (e.g., "stocks earnings", "breakthrough"). */
-      news_query: z.string().default("stocks earnings"),
+      /** `daily` or a weekday name (lowercase): sunday … saturday. */
+      schedule_day: z
+        .enum([
+          "daily",
+          "sunday",
+          "monday",
+          "tuesday",
+          "wednesday",
+          "thursday",
+          "friday",
+          "saturday",
+        ])
+        .default("daily"),
+      /** Local hour 0–23 to run the optimization cycle. */
+      schedule_hour: z.number().int().min(0).max(23).default(2),
+      lookback_days: z.number().int().positive().default(14),
+      challenger_count: z.number().int().positive().max(500).default(50),
+      /** Gaussian mutation scale for weight nudges. */
+      mutation_rate: z.number().positive().max(0.5).default(0.02),
+      learning_rate: z.number().min(0).max(1).default(0.1),
+      improvement_threshold: z.number().min(0).max(2).default(0.1),
+      max_single_weight: z.number().min(0.05).max(1).default(0.3),
+      stress_test_enabled: z.boolean().default(true),
+      shadow_capture_range: z.number().min(0).max(1).default(0.2),
+      /** Hours until outcome % is recorded (matches snapshot exit window). */
+      exit_window_hours: z.number().int().positive().default(48),
+      /**
+       * Challenger / snapshot metadata: hysteresis-style threshold (0–100) stored on feature snapshots.
+       * Tuned by the walk-forward optimizer when gates pass.
+       */
+      challenger_swap_threshold: z.number().int().min(0).max(100).default(10),
+      /**
+       * Challenger tuning: minimum rank-style score (0–100) used when mutating challenger bundles.
+       */
+      challenger_min_entry_score: z.number().int().min(0).max(100).default(75),
+      /** Minimum completed snapshots before running optimization. */
+      min_snapshots: z.number().int().positive().default(10),
+      /** How often to backfill snapshot outcomes from `price_history` (minutes). */
+      outcome_monitor_interval_minutes: z.number().int().positive().default(30),
     })
     .default({}),
 });

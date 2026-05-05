@@ -7,17 +7,20 @@ import type { Decision } from "../actions/types.js";
 import type { Config, Secrets } from "../config.js";
 import { resolveTradingDatabasePath } from "../config.js";
 import type { BrokerAdapter, NewsItem, Position, PriceBar } from "../execution/broker.js";
+import type { LogService } from "../services/logService.js";
 import { aggregateNewsSentiment, getLocalClassifier } from "./sentiment/finbert.js";
 import { checkTradingReadiness, type ReadinessResult } from "./readiness.js";
 import { openTradingDatabase } from "./storage/database.js";
 import { newsItemsForSymbol, TradingRepositories } from "./storage/repositories.js";
-import { computeSimpleStrategy } from "./strategy/simple.js";
-import { runDiscoveryScan, selectTopCandidates, type DiscoveryCandidate } from "./discovery/scanner.js";
+import type { OhlcBar } from "../signal/types.js";
+import { tryRecordFeatureSnapshot, updateExpiredOutcomes } from "./optimization/snapshots.js";
 import {
-  checkAndRunAutoDiscovery,
-  createAutoDiscoveryStatus,
-  type AutoDiscoveryStatus,
-} from "./autoDiscovery.js";
+  buildOptimizationStateSummary,
+  runOptimizationCycle,
+  type OptimizationCycleResult,
+} from "./optimization/optimizer.js";
+import type { OptimizationStateSummary } from "./optimization/types.js";
+import { computeSimpleStrategy } from "./strategy/simple.js";
 
 import type Database from "better-sqlite3";
 
@@ -34,10 +37,11 @@ export interface TradingEngineStatus {
   dbOpenError: string | null;
   lastPortfolioAt: string | null;
   lastCandidateAt: string | null;
-  lastDiscoveryAt: string | null;
   sentimentModelOk: boolean;
   sentimentError: string | null;
   dbPath: string;
+  /** Autonomous optimizer summary (null if DB unavailable). */
+  optimization: OptimizationStateSummary | null;
 }
 
 export class TradingEngine {
@@ -48,13 +52,14 @@ export class TradingEngine {
   private repo: TradingRepositories | null = null;
   private status: TradingEngineStatus;
   private pendingSymbolCooldown = new Map<string, number>();
-  private autoDiscoveryStatus: AutoDiscoveryStatus;
+  /** Optional real-time log bus — injected from Orchestrator. */
+  private readonly logService: LogService | null;
 
-  constructor(config: Config, secrets: Secrets, broker: BrokerAdapter) {
+  constructor(config: Config, secrets: Secrets, broker: BrokerAdapter, logService?: LogService) {
     this.config = config;
     this.secrets = secrets;
     this.broker = broker;
-    this.autoDiscoveryStatus = createAutoDiscoveryStatus();
+    this.logService = logService ?? null;
     this.status = {
       ready: false,
       readiness: { ok: true, issues: [], warnings: [] },
@@ -62,44 +67,26 @@ export class TradingEngine {
       dbOpenError: null,
       lastPortfolioAt: null,
       lastCandidateAt: null,
-      lastDiscoveryAt: null,
       sentimentModelOk: true,
       sentimentError: null,
       dbPath: resolveTradingDatabasePath(config),
+      optimization: null,
     };
   }
 
   getStatus(): TradingEngineStatus {
-    // Include auto-discovery message if present
-    const baseStatus = { ...this.status };
-    if (this.autoDiscoveryStatus.lastMessage) {
-      baseStatus.lastError = this.autoDiscoveryStatus.lastMessage;
+    const baseStatus: TradingEngineStatus = {
+      ...this.status,
+    };
+    const repo = this.repo;
+    if (repo) {
+      try {
+        baseStatus.optimization = buildOptimizationStateSummary(this.config, repo);
+      } catch {
+        baseStatus.optimization = this.status.optimization;
+      }
     }
     return baseStatus;
-  }
-
-  /**
-   * Check if user has positions and auto-discover/invest if not.
-   * Called from agent cycle. Returns true if auto-discovery was triggered.
-   */
-  async checkAndRunAutoDiscovery(): Promise<boolean> {
-    const repo = this.ensureDb();
-    if (!repo) return false;
-
-    const triggered = await checkAndRunAutoDiscovery(
-      this.config,
-      this.secrets,
-      this.broker,
-      repo,
-      this.autoDiscoveryStatus,
-    );
-
-    // Update status message
-    if (this.autoDiscoveryStatus.lastMessage) {
-      this.status.lastError = this.autoDiscoveryStatus.lastMessage;
-    }
-
-    return triggered;
   }
 
   private ensureDb(): TradingRepositories | null {
@@ -180,7 +167,7 @@ export class TradingEngine {
    */
   async evaluateSymbol(
     symbol: string,
-    _reason: "portfolio" | "candidate" | "discovery" | "manual",
+    _reason: "portfolio" | "candidate" | "manual",
   ): Promise<void> {
     void _reason;
     if (!this.config.trading.enabled || !this.config.strategy.simple.enabled) {
@@ -220,6 +207,7 @@ export class TradingEngine {
       bars = await this.broker.getPriceHistory(sym, BARS_DAYS);
     } catch (e) {
       this.status.lastError = e instanceof Error ? e.message : String(e);
+      this.logTrading("warn", `${sym}: price fetch failed — ${this.status.lastError}`);
       repo.insertSignal({
         symbol: sym,
         technicalScore: null,
@@ -232,6 +220,7 @@ export class TradingEngine {
       return;
     }
     if (bars.length < 55) {
+      this.logTrading("warn", `${sym}: only ${bars.length} bars — need ≥55 for SMA/RSI, skipping`);
       repo.insertSignal({
         symbol: sym,
         technicalScore: null,
@@ -262,7 +251,27 @@ export class TradingEngine {
       newsItemsForSymbol(newsItems),
     );
 
-    const strat = computeSimpleStrategy(this.config, { closes, sentimentScore });
+    const ohlcBars: OhlcBar[] = bars.map((b) => ({ o: b.o, h: b.h, l: b.l, c: b.c, v: b.v }));
+    const strat =
+      ohlcBars.length >= 80
+        ? computeSimpleStrategy(this.config, { bars: ohlcBars, sentimentScore })
+        : computeSimpleStrategy(this.config, { closes, sentimentScore });
+
+    this.logTrading(
+      "debug",
+      `${sym}: tech=${strat.technicalScore.toFixed(3)} sentiment=${sentimentScore?.toFixed(3) ?? "n/a"} hybrid=${strat.hybridScore.toFixed(3)} rsi=${strat.rsiValue?.toFixed(1) ?? "—"} → ${strat.action.toUpperCase()}`,
+    );
+
+    tryRecordFeatureSnapshot({
+      config: this.config,
+      tradingRepo: repo,
+      symbol: sym,
+      source: _reason,
+      strat,
+      sentimentScore,
+      priceAtSnapshot: lastClose,
+      signalId: null,
+    });
     const hybrid01 = (strat.hybridScore + 1) / 2;
     const confidence = Math.max(0, Math.min(1, hybrid01));
 
@@ -295,6 +304,7 @@ export class TradingEngine {
     }
 
     if (rejection) {
+      this.logTrading("debug", `${sym}: signal ${strat.action.toUpperCase()} rejected — ${rejection}`);
       repo.insertSignal({
         symbol: sym,
         technicalScore: strat.technicalScore,
@@ -306,6 +316,7 @@ export class TradingEngine {
       });
       return;
     }
+    this.logTrading("info", `${sym}: signal ${action.toUpperCase()} — proceeding to order (confidence=${confidence.toFixed(2)})`);
 
     const account = await this.broker.getAccount();
     const decision = await buildOrderDecision(
@@ -353,185 +364,92 @@ export class TradingEngine {
         filledAvgPrice: submission.order.filledAvgPrice ?? null,
       });
       repo.updateSignal(signalId, { executed: true, rejectionReason: null });
+      this.logTrading(
+        "info",
+        `${sym}: ORDER submitted — ${decision.action.toUpperCase()} qty=${decision.qty} orderId=${submission.order.id} status=${submission.order.status}`,
+      );
     } else {
-      repo.updateSignal(signalId, {
-        executed: false,
-        rejectionReason: submission?.reason ?? "order not submitted",
-      });
+      const reason = submission?.reason ?? "order not submitted";
+      repo.updateSignal(signalId, { executed: false, rejectionReason: reason });
+      this.logTrading("warn", `${sym}: order NOT submitted — ${reason}`);
     }
   }
 
   async runPortfolioCycle(): Promise<void> {
     this.status.lastPortfolioAt = new Date().toISOString();
-    if (!this.config.trading.enabled) return;
+    if (!this.config.trading.enabled) {
+      this.logTrading("warn", "Portfolio cycle skipped — trading disabled");
+      return;
+    }
     this.refreshReadiness();
-    if (!this.status.readiness.ok) return;
+    if (!this.status.readiness.ok) {
+      this.logTrading("warn", `Portfolio cycle skipped — not ready: ${this.status.readiness.issues[0] ?? "unknown"}`);
+      return;
+    }
 
     const positions: Position[] = await this.broker.listPositions();
+    this.logTrading("info", `Portfolio cycle: evaluating ${positions.length} open position(s)`);
     for (const p of positions) {
+      this.logTrading("debug", `  evaluating position ${p.symbol} (qty ${p.qty})`);
       await this.evaluateSymbol(p.symbol, "portfolio");
     }
+    this.logTrading("info", "Portfolio cycle complete");
   }
 
   async runCandidateCycle(): Promise<void> {
     this.status.lastCandidateAt = new Date().toISOString();
-    if (!this.config.trading.enabled) return;
-    for (const s of this.config.watchlist.symbols) {
+    if (!this.config.trading.enabled) {
+      this.logTrading("warn", "Candidate cycle skipped — trading disabled");
+      return;
+    }
+    const repo = this.ensureDb();
+    if (repo) {
+      for (const s of this.config.watchlist.symbols) {
+        repo.upsertWatchlistEntry({
+          symbol: s,
+          status: "watching",
+          source: "config",
+          rankScore: null,
+          lastScannedAt: new Date().toISOString(),
+          cooldownUntil: null,
+          notes: "synced from config.watchlist",
+        });
+      }
+    }
+    const symbols = this.config.watchlist.symbols;
+    this.logTrading("info", `Candidate cycle: evaluating ${symbols.length} watchlist symbol(s)`);
+    for (const s of symbols) {
+      this.logTrading("debug", `  evaluating watchlist candidate ${s}`);
       await this.evaluateSymbol(s, "candidate");
     }
+    this.logTrading("info", "Candidate cycle complete");
   }
 
-  async runDiscoveryCycle(): Promise<void> {
-    this.status.lastDiscoveryAt = new Date().toISOString();
-    if (!this.config.trading.enabled) return;
+  /** Backfill snapshot outcomes from `price_history` (returns rows updated). */
+  runOutcomeBackfill(): number {
+    const repo = this.ensureDb();
+    if (!repo) return 0;
+    return updateExpiredOutcomes(repo, { batchSize: 500, timeframe: TIMEFRAME });
+  }
+
+  /** Run one walk-forward optimization cycle (mutates config + writes config.toml). */
+  runAutonomousOptimization(log?: (msg: string) => void): OptimizationCycleResult {
     const repo = this.ensureDb();
     if (!repo) {
-      this.status.lastError = this.status.dbOpenError ?? "Trading database unavailable.";
-      return;
+      this.logOptimizer("error", "Optimization aborted — database unavailable");
+      return { runId: "", status: "failed", notes: "database unavailable", weightsUpdated: false };
     }
-
-    // Sync existing watchlist
-    for (const s of this.config.watchlist.symbols) {
-      repo.upsertWatchlistEntry({
-        symbol: s,
-        status: "watching",
-        source: "config",
-        rankScore: null,
-        lastScannedAt: new Date().toISOString(),
-        cooldownUntil: null,
-        notes: "synced from config.watchlist",
-      });
-    }
-
-    // Run discovery scanner if enabled
-    if (this.config.discovery?.enabled) {
-      await this.runDiscoveryScanAndInvest(repo);
-    }
-  }
-
-  /**
-   * Discovery scan: find new stocks, rank them, optionally auto-invest.
-   */
-  private async runDiscoveryScanAndInvest(repo: TradingRepositories): Promise<void> {
-    const hasAlpaca =
-      this.config.broker.platform === "alpaca_paper" || this.config.broker.platform === "alpaca_live";
-    if (!hasAlpaca) {
-      this.status.lastError = "Discovery requires Alpaca broker.";
-      return;
-    }
-
-    try {
-      // Get current positions to avoid duplicates
-      const positions = await this.broker.listPositions();
-      const currentSymbols = positions.map((p) => p.symbol.toUpperCase());
-
-      // Run discovery scan
-      const scan = await runDiscoveryScan(this.config, this.secrets, this.broker, repo, {
-        maxCandidates: this.config.discovery.max_candidates ?? 20,
-        minRankScore: this.config.discovery.min_rank_score ?? 50,
-        includePopularETFs: this.config.discovery.include_etfs ?? true,
-        includeTechStocks: this.config.discovery.include_tech ?? true,
-        newsQuery: this.config.discovery.news_query ?? "stocks earnings",
-      });
-
-      if (scan.candidates.length === 0) {
-        return;
-      }
-
-      // Select top candidates for potential investment
-      const topCandidates = selectTopCandidates(
-        scan.candidates,
-        currentSymbols,
-        this.config.discovery.max_new_positions ?? 3,
-      );
-
-      // Record all discoveries to database
-      for (const candidate of scan.candidates) {
-        // Skip if recently discovered (cooldown)
-        const cooldownHours = this.config.discovery.cooldown_hours ?? 48;
-        if (repo.isRecentlyDiscovered(candidate.symbol, cooldownHours)) {
-          continue;
-        }
-
-        const discoveryId = repo.insertDiscovery({
-          symbol: candidate.symbol,
-          source: candidate.source,
-          technicalScore: candidate.technicalScore,
-          sentimentScore: candidate.sentimentScore,
-          hybridScore: candidate.hybridScore,
-          rankScore: candidate.rankScore,
-          priceAtDiscovery: candidate.price,
-          action: candidate.hybridScore > 0.3 ? "buy" : candidate.hybridScore < -0.3 ? "sell" : "hold",
-          notes: candidate.reason,
-        });
-
-        // Auto-invest if candidate is in top list and auto_invest is enabled
-        if (
-          topCandidates.some((c) => c.symbol === candidate.symbol) &&
-          this.config.discovery.auto_invest &&
-          candidate.hybridScore > (this.config.discovery.invest_threshold ?? 0.4)
-        ) {
-          await this.investInDiscovery(repo, candidate, discoveryId);
-        }
-      }
-    } catch (e) {
-      this.status.lastError = e instanceof Error ? e.message : String(e);
-    }
-  }
-
-  /**
-   * Execute a buy order for a discovered stock.
-   */
-  private async investInDiscovery(
-    repo: TradingRepositories,
-    candidate: DiscoveryCandidate,
-    discoveryId: string,
-  ): Promise<void> {
-    try {
-      // Check if already on cooldown
-      const cooldown = this.pendingSymbolCooldown.get(candidate.symbol) ?? 0;
-      if (Date.now() < cooldown) {
-        return;
-      }
-
-      // Get account info for sizing
-      const account = await this.broker.getAccount();
-      const maxPositionNotional = (account.equity * this.config.risk.max_position_pct) / 100;
-      const qty = Math.max(1, Math.floor(maxPositionNotional / candidate.price));
-
-      // Build and submit order
-      const decision: Decision = {
-        action: "buy",
-        symbol: candidate.symbol,
-        qty,
-        reasoning: `Discovery auto-invest: ${candidate.reason}`,
-        confidence: (candidate.hybridScore + 1) / 2,
-      };
-
-      const submission = await submitOrder(decision, this.config, this.broker);
-
-      if (submission.submitted && submission.order) {
-        // Mark as invested
-        repo.markDiscoveryInvested(discoveryId);
-        this.pendingSymbolCooldown.set(candidate.symbol, Date.now() + 3_600_000);
-
-        // Record the trade
-        repo.insertTrade({
-          signalId: null,
-          brokerOrderId: submission.order.id,
-          symbol: candidate.symbol,
-          side: "buy",
-          qty,
-          status: submission.order.status,
-          submittedAt: submission.order.submittedAt,
-          filledAt: null,
-          filledAvgPrice: submission.order.filledAvgPrice ?? null,
-        });
-      }
-    } catch (e) {
-      // Log but don't fail the discovery cycle
-      this.status.lastError = `Discovery invest failed for ${candidate.symbol}: ${e instanceof Error ? e.message : String(e)}`;
-    }
+    this.logOptimizer("info", "Walk-forward optimization cycle starting…");
+    const combinedLog = (msg: string): void => {
+      this.logOptimizer("info", msg);
+      log?.(msg);
+    };
+    const result = runOptimizationCycle(this.config, repo, combinedLog);
+    this.logOptimizer(
+      result.status === "failed" ? "error" : "info",
+      `Optimization complete — status=${result.status} weightsUpdated=${result.weightsUpdated} notes=${result.notes}`,
+    );
+    return result;
   }
 
   close(): void {
@@ -546,6 +464,19 @@ export class TradingEngine {
 
   setBroker(broker: BrokerAdapter): void {
     this.broker = broker;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Internal log helpers — push to the LogService bus so the Debugging screen
+  // receives fine-grained messages without touching the orchestrator state.
+  // ---------------------------------------------------------------------------
+
+  private logTrading(level: "info" | "warn" | "error" | "debug", message: string): void {
+    this.logService?.push("trading", level, message);
+  }
+
+  private logOptimizer(level: "info" | "warn" | "error" | "debug", message: string): void {
+    this.logService?.push("optimizer", level, message);
   }
 }
 

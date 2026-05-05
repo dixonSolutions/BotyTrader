@@ -43,7 +43,6 @@ agent_interval_seconds = 300
 exit_monitor_interval_seconds = 30
 portfolio_cycle_seconds = 300
 candidate_cycle_seconds = 1800
-discovery_cycle_seconds = 14400
 
 [trading]
 enabled = true
@@ -74,11 +73,18 @@ min_confidence_to_trade = 0.6
 stop_loss_pct = 2.0
 take_profit_pct = 5.0
 
+# At least one symbol is required for the simple strategy candidate cycle.
 [watchlist]
 symbols = ["SPY", "QQQ"]
 
 [autotrade]
 enabled = false
+
+[optimization]
+enabled = false
+exit_window_hours = 48
+challenger_swap_threshold = 10
+challenger_min_entry_score = 75
 
 [features]
 memory_enabled = true
@@ -101,12 +107,13 @@ sentiment_weight = 0.35
 | `model` | `provider`, active `id`, local dtype/device/token cap, and `cache_dir` for downloads. |
 | `huggingface` | HF Storage Bucket name for the vector index. |
 | `broker` | Which `BrokerAdapter` to instantiate. |
-| `schedule` | Agent interval, exit monitor, and trading engine cycles (portfolio, candidate, discovery). |
+| `schedule` | Agent interval, exit monitor, and trading engine cycles (portfolio and watchlist candidate intervals). |
+| `optimization` | Autonomous optimizer: schedule, snapshots, walk-forward challengers — includes `challenger_swap_threshold` and `challenger_min_entry_score` used when mutating bundles. |
 | `trading` | Enable simple engine, paper/live, SQLite path — see [Simple strategy](simple-strategy.md). |
 | `strategy.simple` | Technical + FinBERT signal weights, thresholds, and indicator periods. |
 | `sentiment` | FinBERT (local or HF API) and headline cache TTL. |
 | `risk` | Gates for position size, confidence, stops. |
-| `watchlist` | Default symbols for cycles and TUI. |
+| `watchlist` | **Required:** at least one ticker — the bot only evaluates and trades symbols you list here (no automatic universe scan). |
 | `autotrade` | Master switch for real/paper order submission. |
 | `features` | `memory_enabled` — RAG + HF writes (requires `GEMINI_API_KEY` + `HF_TOKEN`); `web_search_enabled` — register `brave_web_search` when a Brave key is set. Keys stay in `.env` when off. |
 | `agent` | `system_prompt`, `max_iterations`, and `sentiment_weight` (ReAct prompt blend; see [Models](models.md)). |

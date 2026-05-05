@@ -12,14 +12,12 @@
  * makes a future remote API straightforward to add.
  */
 
-import { runCycle, type AgentStep } from "./agent/loop.js";
-import { submitOrder, type SubmitOrderResult } from "./actions/alpaca.js";
-import { summarizeToMemory } from "./actions/memory.js";
-import type { Decision } from "./actions/types.js";
 import { resolvePaths, writeConfig, type Config, type Secrets } from "./config.js";
 import type { TradingMode } from "./config.js";
 import { createBrokerAdapter } from "./execution/adapters/index.js";
 import { TradingEngine, type TradingEngineStatus } from "./trading/engine.js";
+import type { LogService } from "./services/logService.js";
+import { shouldRunOptimizationSchedule } from "./trading/optimization/optimizer.js";
 import type { SignalRow } from "./trading/types.js";
 import {
   installLocalSentimentWeights,
@@ -29,17 +27,12 @@ import {
 } from "./trading/sentiment/finbert.js";
 import type { AccountSummary, BrokerAdapter, NewsItem, Order, Position } from "./execution/broker.js";
 import { ExitMonitor, type ExitEvent } from "./execution/exit_monitor.js";
-import type { WorkingMemoryStore } from "./memory/disabled_store.js";
-import { MemoryStore } from "./memory/store.js";
-import type { ModelManager } from "./llm/model_manager.js";
-import type { ToolContext } from "./mcp/tools/index.js";
 import {
   computePerformance,
   type EquitySample,
   type PerformanceMetrics,
 } from "./metrics.js";
 import {
-  clipReasoning,
   readSessionSnapshot,
   writeSessionSnapshot,
 } from "./runtime/session_snapshot.js";
@@ -47,24 +40,10 @@ import type { PreviousSessionSummary } from "./runtime/session_snapshot.js";
 
 export type { PreviousSessionSummary } from "./runtime/session_snapshot.js";
 
-/** Live agent step surfaced to the TUI while a cycle is in flight. */
-export interface AgentLiveState {
-  symbol: string;
-  phase: string;
-  detail?: string;
-}
-
 export interface LogEntry {
   ts: string;
   level: "info" | "warn" | "error" | "agent";
   message: string;
-}
-
-export interface CycleRecord {
-  ts: string;
-  symbol: string;
-  decision: Decision;
-  submission?: SubmitOrderResult;
 }
 
 export type BotStatus = "running" | "paused" | "error";
@@ -72,15 +51,11 @@ export type BotStatus = "running" | "paused" | "error";
 export interface OrchestratorState {
   brokerName: string;
   connected: boolean;
-  cycling: boolean;
   status: BotStatus;
   startedAt: string;
-  lastCycleAt: string | null;
   pingMs: number | null;
-  agentIntervalSeconds: number;
   account: AccountSummary | null;
   positions: Position[];
-  recentCycles: CycleRecord[];
   logs: LogEntry[];
   watchlist: string[];
   autotrade: boolean;
@@ -89,21 +64,12 @@ export interface OrchestratorState {
   performance: PerformanceMetrics;
   /** Summary written when the app last exited cleanly (see `session_snapshot.ts`). */
   previousSession: PreviousSessionSummary | null;
-  /** ISO time when the next automatic cycle is scheduled (null if paused or not yet armed). */
-  nextScheduledCycleAt: string | null;
-  /** Type of the next scheduled cycle for display purposes. */
-  nextScheduledCycleType: "agent" | "portfolio" | "candidate" | "discovery" | null;
-  /** Non-null while the LLM loop is progressing for a symbol. */
-  agentLive: AgentLiveState | null;
-  /** Reasoning text from the most recently completed cycle (cleared on new cycle start). */
-  lastCompletedReasoning: string | null;
   /** Deterministic simple-strategy engine status (FinBERT, DB, Alpaca). */
   trading: TradingEngineStatus;
   /** True while a trading engine cycle (portfolio/candidate) is in flight. */
   tradingBusy: boolean;
   portfolioCycleSeconds: number;
   candidateCycleSeconds: number;
-  discoveryCycleSeconds: number;
   tradingMode: TradingMode;
   /** Latest rows from `signals` table (simple strategy audit). */
   recentTradingSignals: SignalRow[];
@@ -112,7 +78,6 @@ export interface OrchestratorState {
 export type StateListener = (state: OrchestratorState) => void;
 
 const LOG_BUFFER_MAX = 500;
-const CYCLE_BUFFER_MAX = 50;
 const EQUITY_HISTORY_MAX = 1024;
 const ORDER_HISTORY_MAX = 200;
 const PING_INTERVAL_MS = 15_000;
@@ -121,8 +86,9 @@ export interface OrchestratorOptions {
   config: Config;
   secrets: Secrets;
   broker: BrokerAdapter;
-  memory: WorkingMemoryStore;
-  models: ModelManager;
+  /** Optional real-time log bus. When supplied, every log entry is also pushed
+   *  to the LogService so the Debugging screen can stream it live. */
+  logService?: LogService;
 }
 
 export class Orchestrator {
@@ -130,49 +96,40 @@ export class Orchestrator {
   readonly secrets: Secrets;
   /** Swapped at runtime when paper/live (Alpaca) changes — do not hold stale references. */
   broker: BrokerAdapter;
-  readonly memory: WorkingMemoryStore;
-  readonly models: ModelManager;
   exitMonitor: ExitMonitor;
   readonly tradingEngine: TradingEngine;
+  /** Real-time log bus (injected at construction, optional). */
+  readonly logService: LogService | null;
 
-  private ctx: ToolContext;
   private readonly listeners = new Set<StateListener>();
   private state: OrchestratorState;
-  private timer: NodeJS.Timeout | null = null;
   private pingTimer: NodeJS.Timeout | null = null;
   private portfolioTimer: NodeJS.Timeout | null = null;
   private candidateTimer: NodeJS.Timeout | null = null;
-  private discoveryTimer: NodeJS.Timeout | null = null;
-  private rotationIndex = 0;
-  private cycleInFlight = false;
+  private outcomeMonitorTimer: NodeJS.Timeout | null = null;
+  private optimizationScheduleTimer: NodeJS.Timeout | null = null;
+  private lastOptimizationLocalDayKey: string | null = null;
+  private optimizationInFlight = false;
   private tradingCycleInFlight = false;
   private paused = false;
-  /** Completed agent cycles this process (used for session snapshot on stop). */
-  private sessionCycleCount = 0;
 
   constructor(opts: OrchestratorOptions) {
     this.config = opts.config;
     this.secrets = opts.secrets;
     this.broker = opts.broker;
-    this.memory = opts.memory;
-    this.models = opts.models;
-    this.ctx = { broker: opts.broker, secrets: opts.secrets };
+    this.logService = opts.logService ?? null;
     this.exitMonitor = new ExitMonitor(opts.broker, opts.config);
-    this.tradingEngine = new TradingEngine(opts.config, opts.secrets, opts.broker);
+    this.tradingEngine = new TradingEngine(opts.config, opts.secrets, opts.broker, opts.logService);
 
     const paths = resolvePaths();
     this.state = {
       brokerName: this.broker.name,
       connected: false,
-      cycling: false,
       status: "running",
       startedAt: new Date().toISOString(),
-      lastCycleAt: null,
       pingMs: null,
-      agentIntervalSeconds: this.config.schedule.agent_interval_seconds,
       account: null,
       positions: [],
-      recentCycles: [],
       logs: [],
       watchlist: [...this.config.watchlist.symbols],
       autotrade: this.config.autotrade.enabled,
@@ -180,15 +137,10 @@ export class Orchestrator {
       recentOrders: [],
       performance: emptyPerformance(),
       previousSession: readSessionSnapshot(paths.root),
-      nextScheduledCycleAt: null,
-      nextScheduledCycleType: null,
-      agentLive: null,
-      lastCompletedReasoning: null,
       trading: this.tradingEngine.getStatus(),
       tradingBusy: false,
       portfolioCycleSeconds: this.config.schedule.portfolio_cycle_seconds,
       candidateCycleSeconds: this.config.schedule.candidate_cycle_seconds,
-      discoveryCycleSeconds: this.config.schedule.discovery_cycle_seconds,
       tradingMode: this.config.trading.mode,
       recentTradingSignals: [],
     };
@@ -207,47 +159,35 @@ export class Orchestrator {
     this.pushTradingState();
     await this.measurePing();
 
-    if (this.config.features.memory_enabled) {
-      await this.memory.sync().catch((err) => {
-        this.log("warn", `Memory sync failed: ${describe(err)}`);
-      });
-    }
     await this.refreshAccount();
     await this.refreshOrders();
 
     this.exitMonitor.start();
     this.startPingLoop();
-    this.scheduleNext();
     this.scheduleTradingCycles();
+    this.startOptimizationTimers();
   }
 
   stop(): void {
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
     if (this.pingTimer) {
       clearInterval(this.pingTimer);
       this.pingTimer = null;
     }
     this.clearTradingTimers();
+    this.clearOptimizationTimers();
     this.tradingEngine.close();
     this.exitMonitor.stop();
     this.persistSessionSnapshot();
-    this.update({ cycling: false, nextScheduledCycleAt: null, agentLive: null });
     this.log("info", "Orchestrator stopped.");
   }
 
   pause(): void {
     if (this.paused) return;
     this.paused = true;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
     this.clearTradingTimers();
+    this.clearOptimizationTimers();
     this.exitMonitor.stop();
-    this.update({ status: "paused", nextScheduledCycleAt: null });
+    this.update({ status: "paused" });
     this.log("info", "Orchestrator paused.");
   }
 
@@ -255,8 +195,8 @@ export class Orchestrator {
     if (!this.paused) return;
     this.paused = false;
     this.exitMonitor.start();
-    this.scheduleNext();
     this.scheduleTradingCycles();
+    this.startOptimizationTimers();
     this.update({ status: "running" });
     this.log("info", "Orchestrator resumed.");
   }
@@ -284,16 +224,6 @@ export class Orchestrator {
   // Commands (called from TUI)
   // -------------------------------------------------------------------------
 
-  /** Trigger a cycle for the next watchlist symbol immediately. */
-  async runNow(symbol?: string): Promise<void> {
-    const target = symbol ?? this.nextSymbol();
-    if (!target) {
-      this.log("warn", "Watchlist is empty.");
-      return;
-    }
-    await this.runCycleFor(target);
-  }
-
   setAutotrade(enabled: boolean): void {
     this.config.autotrade.enabled = enabled;
     writeConfig(this.config);
@@ -301,32 +231,9 @@ export class Orchestrator {
     this.log("info", `Autotrade ${enabled ? "enabled" : "disabled"}`);
   }
 
-  setMemoryEnabled(enabled: boolean): void {
-    this.config.features.memory_enabled = enabled;
-    writeConfig(this.config);
-    if (enabled) {
-      this.log(
-        "info",
-        "Memory enabled — restart BotyTrader once if you started with memory off so the Gemini embedder attaches correctly.",
-      );
-    } else {
-      this.log("info", "Memory disabled — RAG search and memory writes are skipped (keys stay in .env).");
-    }
-  }
-
-  setWebSearchEnabled(enabled: boolean): void {
-    this.config.features.web_search_enabled = enabled;
-    writeConfig(this.config);
-    if (enabled && !this.secrets.BRAVE_API_KEY?.trim()) {
-      this.log("warn", "Web search enabled but BRAVE_API_KEY is empty — set it in .env to use brave_web_search.");
-    } else {
-      this.log("info", `Web search ${enabled ? "enabled" : "disabled"} (keys stay in .env).`);
-    }
-  }
-
   /**
    * Persist `agent.sentiment_weight` (0 = technical-heavy, 1 = sentiment-heavy).
-   * Used from Config → Models (agent blend ±).
+   * Used from Config → Models (strategy blend between technical and FinBERT sentiment).
    */
   setSentimentWeight(weight: number): void {
     if (!Number.isFinite(weight)) {
@@ -341,24 +248,14 @@ export class Orchestrator {
 
   setWatchlist(symbols: string[]): void {
     const unique = Array.from(new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean)));
-    this.config.watchlist.symbols = unique;
-    this.rotationIndex = 0;
-    this.update({ watchlist: unique });
-    this.log("info", `Watchlist updated: ${unique.join(", ") || "(empty)"}`);
-  }
-
-  /** Update the cycle interval and reschedule immediately. Persists to config.toml. */
-  setAgentInterval(seconds: number): void {
-    if (!Number.isFinite(seconds) || seconds < 1) {
-      this.log("warn", `Ignoring invalid agent interval: ${seconds}`);
+    if (unique.length === 0) {
+      this.log("warn", "Watchlist must include at least one symbol — change ignored.");
       return;
     }
-    const rounded = Math.floor(seconds);
-    this.config.schedule.agent_interval_seconds = rounded;
-    this.update({ agentIntervalSeconds: rounded });
-    if (!this.paused) this.scheduleNext();
+    this.config.watchlist.symbols = unique;
     writeConfig(this.config);
-    this.log("info", `Agent interval set to ${rounded}s.`);
+    this.update({ watchlist: unique });
+    this.log("info", `Watchlist updated: ${unique.join(", ")}`);
   }
 
   /** Generic numeric field setter for risk thresholds — used by the Settings editor. */
@@ -417,7 +314,6 @@ export class Orchestrator {
       const next = createBrokerAdapter(this.config.broker.platform, this.secrets);
       this.broker = next;
       this.tradingEngine.setBroker(next);
-      this.ctx = { broker: next, secrets: this.secrets };
       this.exitMonitor.stop();
       this.exitMonitor = new ExitMonitor(next, this.config);
       this.exitMonitor.onExit((e) => this.onExitEvent(e));
@@ -464,6 +360,104 @@ export class Orchestrator {
     if (!Number.isFinite(value) || value < 1) return;
     this.config.strategy.simple[field] = Math.floor(value);
     writeConfig(this.config);
+    this.pushTradingState();
+  }
+
+  /**
+   * Enable/disable a technical indicator.
+   * @param indicatorId - The indicator ID (sma, ema, rsi, macd, bollinger, stochastic, atr, obv, fibonacci, ichimoku)
+   * @param enabled - Whether to enable the indicator
+   */
+  setIndicatorEnabled(indicatorId: keyof Config["indicators"], enabled: boolean): void {
+    const indicator = this.config.indicators[indicatorId];
+    if (!indicator) return;
+    indicator.enabled = enabled;
+    writeConfig(this.config);
+    this.log("info", `Indicator ${indicatorId} ${enabled ? "enabled" : "disabled"}.`);
+    this.pushTradingState();
+  }
+
+  /**
+   * Set the weight for a technical indicator.
+   * @param indicatorId - The indicator ID
+   * @param weight - The weight (0-1) for this indicator in the composite score
+   */
+  setIndicatorWeight(indicatorId: keyof Config["indicators"], weight: number): void {
+    if (!Number.isFinite(weight) || weight < 0 || weight > 1) return;
+    const indicator = this.config.indicators[indicatorId];
+    if (!indicator) return;
+    indicator.weight = weight;
+    writeConfig(this.config);
+    this.log("info", `Indicator ${indicatorId} weight set to ${(weight * 100).toFixed(0)}%.`);
+    this.pushTradingState();
+  }
+
+  /**
+   * Set an integer parameter for an indicator.
+   * @param indicatorId - The indicator ID
+   * @param field - The field name (period, fast_period, slow_period, etc.)
+   * @param value - The integer value
+   */
+  setIndicatorInt(
+    indicatorId: keyof Config["indicators"],
+    field: string,
+    value: number,
+  ): void {
+    if (!Number.isFinite(value) || value < 1) return;
+    const indicator = this.config.indicators[indicatorId];
+    if (!indicator) return;
+    // Type-safe assignment to the indicator config
+    (indicator as Record<string, number | boolean>)[field] = Math.floor(value);
+    writeConfig(this.config);
+    this.log("info", `Indicator ${indicatorId} ${field} set to ${Math.floor(value)}.`);
+    this.pushTradingState();
+  }
+
+  /**
+   * Set a numeric parameter for an indicator.
+   * @param indicatorId - The indicator ID
+   * @param field - The field name (std_dev, proximity_threshold, etc.)
+   * @param value - The numeric value
+   */
+  setIndicatorNumeric(
+    indicatorId: keyof Config["indicators"],
+    field: string,
+    value: number,
+  ): void {
+    if (!Number.isFinite(value)) return;
+    const indicator = this.config.indicators[indicatorId];
+    if (!indicator) return;
+    (indicator as Record<string, number | boolean>)[field] = value;
+    writeConfig(this.config);
+    this.log("info", `Indicator ${indicatorId} ${field} set to ${value.toFixed(4)}.`);
+    this.pushTradingState();
+  }
+
+  /**
+   * Reset all indicator weights to their default values.
+   */
+  resetIndicatorWeights(): void {
+    const defaults = {
+      sma: 0.15,
+      ema: 0.10,
+      rsi: 0.12,
+      macd: 0.10,
+      bollinger: 0.08,
+      stochastic: 0.08,
+      atr: 0.05,
+      obv: 0.12,
+      fibonacci: 0.10,
+      ichimoku: 0.10,
+    };
+    for (const [id, weight] of Object.entries(defaults)) {
+      const indicator = this.config.indicators[id as keyof Config["indicators"]];
+      if (indicator) {
+        indicator.weight = weight;
+        indicator.enabled = true;
+      }
+    }
+    writeConfig(this.config);
+    this.log("info", "All indicator weights reset to defaults.");
     this.pushTradingState();
   }
 
@@ -530,26 +524,130 @@ export class Orchestrator {
     return r;
   }
 
-  setTradingCycleInterval(
-    field: "portfolio" | "candidate" | "discovery",
-    seconds: number,
-  ): void {
+  setTradingCycleInterval(field: "portfolio" | "candidate", seconds: number): void {
     if (!Number.isFinite(seconds) || seconds < 1) return;
     const s = Math.floor(seconds);
     if (field === "portfolio") {
       this.config.schedule.portfolio_cycle_seconds = s;
       this.update({ portfolioCycleSeconds: s });
-    } else if (field === "candidate") {
+    } else {
       this.config.schedule.candidate_cycle_seconds = s;
       this.update({ candidateCycleSeconds: s });
-    } else {
-      this.config.schedule.discovery_cycle_seconds = s;
-      this.update({ discoveryCycleSeconds: s });
     }
     writeConfig(this.config);
     if (!this.paused) {
       this.clearTradingTimers();
       this.scheduleTradingCycles();
+    }
+  }
+
+  setOptimizationEnabled(enabled: boolean): void {
+    this.config.optimization.enabled = enabled;
+    writeConfig(this.config);
+    if (!this.paused) {
+      this.clearOptimizationTimers();
+      this.startOptimizationTimers();
+    }
+    this.pushTradingState();
+    this.log("info", `Autonomous optimizer ${enabled ? "enabled" : "disabled"}.`);
+  }
+
+  setOptimizationScheduleDay(
+    day: "daily" | "sunday" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday",
+  ): void {
+    this.config.optimization.schedule_day = day;
+    writeConfig(this.config);
+    this.pushTradingState();
+  }
+
+  setOptimizationScheduleHour(hour: number): void {
+    if (!Number.isFinite(hour) || hour < 0 || hour > 23) return;
+    this.config.optimization.schedule_hour = Math.floor(hour);
+    writeConfig(this.config);
+    this.pushTradingState();
+  }
+
+  setOptimizationNumeric(
+    field:
+      | "lookback_days"
+      | "challenger_count"
+      | "learning_rate"
+      | "improvement_threshold"
+      | "max_single_weight"
+      | "exit_window_hours"
+      | "shadow_capture_range"
+      | "mutation_rate"
+      | "min_snapshots"
+      | "outcome_monitor_interval_minutes",
+    value: number,
+  ): void {
+    if (!Number.isFinite(value)) return;
+    const o = this.config.optimization;
+    switch (field) {
+      case "lookback_days":
+        o.lookback_days = Math.max(1, Math.floor(value));
+        break;
+      case "challenger_count":
+        o.challenger_count = Math.max(1, Math.min(500, Math.floor(value)));
+        break;
+      case "learning_rate":
+        o.learning_rate = Math.max(0, Math.min(1, value));
+        break;
+      case "improvement_threshold":
+        o.improvement_threshold = Math.max(0, Math.min(2, value));
+        break;
+      case "max_single_weight":
+        o.max_single_weight = Math.max(0.05, Math.min(1, value));
+        break;
+      case "exit_window_hours":
+        o.exit_window_hours = Math.max(1, Math.floor(value));
+        break;
+      case "shadow_capture_range":
+        o.shadow_capture_range = Math.max(0, Math.min(1, value));
+        break;
+      case "mutation_rate":
+        o.mutation_rate = Math.max(1e-6, Math.min(0.5, value));
+        break;
+      case "min_snapshots":
+        o.min_snapshots = Math.max(1, Math.floor(value));
+        break;
+      case "outcome_monitor_interval_minutes":
+        o.outcome_monitor_interval_minutes = Math.max(1, Math.floor(value));
+        break;
+    }
+    writeConfig(this.config);
+    if (field === "outcome_monitor_interval_minutes" && !this.paused) {
+      this.clearOptimizationTimers();
+      this.startOptimizationTimers();
+    }
+    this.pushTradingState();
+  }
+
+  setOptimizationStressTestEnabled(enabled: boolean): void {
+    this.config.optimization.stress_test_enabled = enabled;
+    writeConfig(this.config);
+    this.pushTradingState();
+  }
+
+  /** Run walk-forward optimization once (Insights / testing). */
+  async runOptimizationNow(): Promise<void> {
+    if (this.optimizationInFlight) {
+      this.log("warn", "Optimization already running.");
+      return;
+    }
+    this.optimizationInFlight = true;
+    try {
+      this.log("info", "Manual optimization cycle starting…");
+      const result = this.tradingEngine.runAutonomousOptimization((m) => this.log("info", m));
+      this.log(
+        "info",
+        `Optimization: ${result.status}${result.weightsUpdated ? " — config updated" : ""} — ${result.notes}`,
+      );
+    } catch (e) {
+      this.log("error", `Optimization: ${describe(e)}`);
+    } finally {
+      this.optimizationInFlight = false;
+      this.pushTradingState();
     }
   }
 
@@ -592,10 +690,64 @@ export class Orchestrator {
       clearInterval(this.candidateTimer);
       this.candidateTimer = null;
     }
-    if (this.discoveryTimer) {
-      clearInterval(this.discoveryTimer);
-      this.discoveryTimer = null;
+  }
+
+  private clearOptimizationTimers(): void {
+    if (this.outcomeMonitorTimer) {
+      clearInterval(this.outcomeMonitorTimer);
+      this.outcomeMonitorTimer = null;
     }
+    if (this.optimizationScheduleTimer) {
+      clearInterval(this.optimizationScheduleTimer);
+      this.optimizationScheduleTimer = null;
+    }
+  }
+
+  private startOptimizationTimers(): void {
+    this.clearOptimizationTimers();
+    const o = this.config.optimization;
+    if (!o.enabled) return;
+
+    const mins = o.outcome_monitor_interval_minutes ?? 30;
+    this.outcomeMonitorTimer = setInterval(() => {
+      if (this.paused) return;
+      try {
+        const n = this.tradingEngine.runOutcomeBackfill();
+        if (n > 0) {
+          this.log("info", `Optimizer: updated ${n} snapshot outcomes`);
+          this.pushTradingState();
+        }
+      } catch (e) {
+        this.log("warn", `Outcome backfill: ${describe(e)}`);
+      }
+    }, mins * 60_000);
+
+    this.optimizationScheduleTimer = setInterval(() => {
+      if (this.paused || this.optimizationInFlight) return;
+      const { run, dayKey } = shouldRunOptimizationSchedule(
+        this.config,
+        new Date(),
+        this.lastOptimizationLocalDayKey,
+      );
+      if (!run || !this.config.trading.enabled) return;
+      this.optimizationInFlight = true;
+      this.lastOptimizationLocalDayKey = dayKey;
+      void (async () => {
+        try {
+          this.log("info", "Scheduled autonomous optimization starting…");
+          const result = this.tradingEngine.runAutonomousOptimization((m) => this.log("info", m));
+          this.log(
+            "info",
+            `Optimization: ${result.status}${result.weightsUpdated ? " — config updated" : ""} — ${result.notes}`,
+          );
+        } catch (e) {
+          this.log("error", `Optimization: ${describe(e)}`);
+        } finally {
+          this.optimizationInFlight = false;
+          this.pushTradingState();
+        }
+      })();
+    }, 60_000);
   }
 
   private scheduleTradingCycles(): void {
@@ -640,49 +792,12 @@ export class Orchestrator {
       })();
     }, this.config.schedule.candidate_cycle_seconds * 1000);
 
-    // Use discovery-specific interval if enabled, otherwise fall back to schedule
-    const discoveryIntervalMs = this.config.discovery?.enabled
-      ? (this.config.discovery.scan_interval_seconds ?? this.config.schedule.discovery_cycle_seconds) * 1000
-      : this.config.schedule.discovery_cycle_seconds * 1000;
-
-    this.discoveryTimer = setInterval(() => {
-      if (this.paused) return;
-      void (async () => {
-        try {
-          await this.tradingEngine.runDiscoveryCycle();
-        } catch (e) {
-          this.log("error", `Discovery: ${describe(e)}`);
-        } finally {
-          this.pushTradingState();
-        }
-      })();
-    }, discoveryIntervalMs);
-
     this.pushTradingState();
   }
 
   // -------------------------------------------------------------------------
   // Cycle execution
   // -------------------------------------------------------------------------
-
-  private scheduleNext(): void {
-    if (this.timer) clearTimeout(this.timer);
-    if (this.paused) {
-      this.update({ nextScheduledCycleAt: null });
-      return;
-    }
-    const intervalMs = this.config.schedule.agent_interval_seconds * 1000;
-    const nextAt = new Date(Date.now() + intervalMs).toISOString();
-    this.update({ nextScheduledCycleAt: nextAt });
-    this.timer = setTimeout(() => {
-      const symbol = this.nextSymbol();
-      if (symbol) {
-        void this.runCycleFor(symbol).finally(() => this.scheduleNext());
-      } else {
-        this.scheduleNext();
-      }
-    }, intervalMs);
-  }
 
   private startPingLoop(): void {
     if (this.pingTimer) return;
@@ -708,201 +823,6 @@ export class Orchestrator {
     });
     if (ok && !wasConnected) this.log("info", `Broker reachable (${elapsed}ms).`);
     if (!ok && wasConnected) this.log("warn", "Broker unreachable.");
-  }
-
-  private nextSymbol(): string | null {
-    const list = this.config.watchlist.symbols;
-    if (list.length === 0) return null;
-    const symbol = list[this.rotationIndex % list.length];
-    this.rotationIndex++;
-    return symbol;
-  }
-
-  private async runCycleFor(symbol: string): Promise<void> {
-    if (this.cycleInFlight) {
-      this.log("warn", `Skipping cycle for ${symbol} — previous cycle still running.`);
-      return;
-    }
-    if (!this.models.activeId) {
-      this.log(
-        "warn",
-        `No reasoning model selected. Set Config → Settings → Active local model, or [model] id in config.toml (and HF Inference API + id if using remote).`,
-      );
-      return;
-    }
-
-    // Check if user has no positions - run auto-discovery to bootstrap portfolio
-    if (this.config.trading.enabled && this.config.discovery?.enabled && this.config.discovery.auto_invest) {
-      try {
-        const triggered = await this.tradingEngine.checkAndRunAutoDiscovery();
-        if (triggered) {
-          this.log("info", "Auto-discovery triggered: User has no positions. Finding best stocks to invest...");
-          await this.refreshAccount();
-          this.pushTradingState();
-          // After auto-discovery completes, we can still run the normal cycle
-        }
-      } catch (e) {
-        this.log("error", `Auto-discovery check failed: ${describe(e)}`);
-      }
-    }
-
-    this.cycleInFlight = true;
-    this.update({
-      cycling: true,
-      nextScheduledCycleAt: null,
-      agentLive: { symbol, phase: "Starting", detail: "Invoking LLM and tools…" },
-      lastCompletedReasoning: null,
-    });
-    const startedAt = new Date().toISOString();
-    const startedAtMs = Date.now();
-    this.log("info", `▶▶▶ Cycle START: ${symbol} at ${startedAt.slice(11, 19)}`);
-
-    try {
-      const result = await runCycle({
-        symbol,
-        config: this.config,
-        secrets: this.secrets,
-        ctx: this.ctx,
-        memory: this.memory,
-        onStep: (step) => this.handleAgentStep(symbol, step),
-      });
-
-      let submission: SubmitOrderResult | undefined;
-      try {
-        submission = await submitOrder(result.decision, this.config, this.broker);
-        if (submission.submitted && submission.order) {
-          const o = submission.order;
-          this.log(
-            "info",
-            `Order placed ${o.symbol} ${o.side} qty=${o.qty} status=${o.status} id=${o.id} (Alpaca may fill after this response — positions refresh shortly)`,
-          );
-          // POST /orders often returns before the position exists; brief wait so the TUI matches Alpaca.
-          await sleepMs(750);
-          await this.refreshAccount();
-        } else if (submission.submitted) {
-          this.log("info", "Order submitted (broker returned no order body).");
-        } else {
-          this.log("info", `No order submitted: ${submission.reason}`);
-        }
-      } catch (err) {
-        this.log("error", `submitOrder failed: ${describe(err)}`);
-      }
-
-      if (this.config.features.memory_enabled && this.memory instanceof MemoryStore) {
-        try {
-          await summarizeToMemory(
-            {
-              symbol,
-              decision: result.decision,
-              toolCalls: result.toolCalls,
-              startedAt,
-              finishedAt: new Date().toISOString(),
-            },
-            this.memory,
-          );
-        } catch (err) {
-          this.log("warn", `Memory write failed: ${describe(err)}`);
-        }
-      }
-
-      const record: CycleRecord = { ts: new Date().toISOString(), symbol, decision: result.decision, submission };
-      this.update({
-        lastCycleAt: record.ts,
-        recentCycles: [record, ...this.state.recentCycles].slice(0, CYCLE_BUFFER_MAX),
-        lastCompletedReasoning: result.decision.reasoning,
-      });
-      await this.refreshAccount();
-      await this.refreshOrders();
-      this.recomputePerformance();
-      const durationMs = Date.now() - startedAtMs;
-      this.log("info", `◀◀◀ Cycle END: ${symbol} | duration ${durationMs}ms | decision: ${result.decision.action}`);
-    } catch (err) {
-      this.log("error", `Cycle failed for ${symbol}: ${describe(err)}`);
-    } finally {
-      this.sessionCycleCount += 1;
-      this.cycleInFlight = false;
-      this.update({ cycling: false, agentLive: null });
-    }
-  }
-
-  private handleAgentStep(symbol: string, step: AgentStep): void {
-    switch (step.kind) {
-      case "rag":
-        this.update({
-          agentLive: { symbol, phase: "RAG", detail: `${step.hits} memory snippets` },
-        });
-        this.log("info", `[${symbol}] Memory: ${step.hits} relevant past decisions loaded`);
-        break;
-      case "tool_call": {
-        // Log tool call with key args for visibility
-        const args = step.args as Record<string, unknown>;
-        let detail = "";
-        if (step.name === "fetch_price" && args.symbol) detail = ` for ${String(args.symbol)}`;
-        else if (step.name === "fetch_bars" && args.symbol) detail = ` ${String(args.symbol)} ${String(args.n)} bars`;
-        else if (step.name === "fetch_news" && args.query) detail = ` query: "${String(args.query).slice(0, 30)}..."`;
-        else if (step.name === "compute_sentiment" && args.text) detail = ` analyzing ${String(args.text).length} chars`;
-        else if (step.name === "calc_technical_score" && args.symbol) detail = ` ${String(args.symbol)} SMA/RSI calc`;
-        else if (args.symbol) detail = ` ${String(args.symbol)}`;
-
-        this.update({
-          agentLive: { symbol, phase: "Tool call", detail: `${step.name}${detail}` },
-        });
-        this.log("info", `[${symbol}] → ${step.name}${detail}`);
-        break;
-      }
-      case "tool_result": {
-        this.update({
-          agentLive: {
-            symbol,
-            phase: "Tool result",
-            detail: `${step.name} ${step.ok ? "✓" : "✗"}`,
-          },
-        });
-        // Log summary of results for key tools
-        if (step.ok && step.result) {
-          const r = step.result as Record<string, unknown>;
-          if (step.name === "calc_technical_score" && r.score !== undefined) {
-            this.log("info", `[${symbol}] Technical score: ${Number(r.score).toFixed(2)} (SMA/RSI weighted)`);
-          } else if (step.name === "compute_sentiment" && r.sentiment !== undefined) {
-            this.log("info", `[${symbol}] Sentiment: ${String(r.sentiment)} (FinBERT analysis)`);
-          } else if (step.name === "fetch_price" && r.price !== undefined) {
-            this.log("info", `[${symbol}] Current price: $${Number(r.price).toFixed(2)}`);
-          } else if (step.name === "fetch_account" && r.buying_power !== undefined) {
-            this.log("info", `[${symbol}] Account: $${Number(r.buying_power).toFixed(2)} buying power`);
-          }
-        } else if (!step.ok) {
-          this.log("warn", `[${symbol}] Tool failed: ${step.name} — ${step.error || "unknown error"}`);
-        }
-        break;
-      }
-      case "decision": {
-        const d = step.decision;
-        const r = clipReasoning(d.reasoning, 180);
-        this.update({
-          agentLive: {
-            symbol,
-            phase: "Decision",
-            detail: `${d.action.toUpperCase()} qty=${d.qty} conf=${d.confidence.toFixed(2)}`,
-          },
-        });
-        this.log("info", `[${symbol}] ★ DECISION: ${d.action.toUpperCase()} | qty=${d.qty} | conf=${d.confidence.toFixed(2)}`);
-        if (r) this.log("info", `[${symbol}] Reasoning: ${r}`);
-        break;
-      }
-      case "model_response": {
-        // Extract thought/action from model output for logging
-        const content = step.content || "";
-        const thoughtMatch = content.match(/Thought:\s*(.+?)(?:\n|$)/i);
-        const thought = thoughtMatch ? thoughtMatch[1]?.trim().slice(0, 120) : "";
-        this.update({
-          agentLive: { symbol, phase: "Thinking", detail: thought || "Processing..." },
-        });
-        if (thought) {
-          this.log("info", `[${symbol}] 💭 ${thought}`);
-        }
-        break;
-      }
-    }
   }
 
   private onExitEvent(event: ExitEvent): void {
@@ -953,14 +873,9 @@ export class Orchestrator {
   private persistSessionSnapshot(): void {
     try {
       const root = resolvePaths().root;
-      const last = this.state.recentCycles[0];
       writeSessionSnapshot(root, {
         endedAt: new Date().toISOString(),
         startedAt: this.state.startedAt,
-        cyclesCompleted: this.sessionCycleCount,
-        lastSymbol: last?.symbol ?? null,
-        lastAction: last?.decision.action ?? null,
-        lastReasoningSnippet: clipReasoning(last?.decision.reasoning ?? null),
       });
     } catch {
       // Ignore disk errors on exit.
@@ -971,6 +886,8 @@ export class Orchestrator {
     const entry: LogEntry = { ts: new Date().toISOString(), level, message };
     const logs = [entry, ...this.state.logs].slice(0, LOG_BUFFER_MAX);
     this.update({ logs });
+    // Mirror to the real-time log service so the Debugging screen can stream it.
+    this.logService?.push("system", level, message);
   }
 
   private update(patch: Partial<OrchestratorState>): void {
@@ -985,10 +902,6 @@ export class Orchestrator {
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-function sleepMs(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function emptyPerformance(): PerformanceMetrics {

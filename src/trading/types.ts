@@ -2,6 +2,8 @@
  * Public types for the trading engine and persistence.
  */
 
+import type { TechnicalScoreResult } from "../signal/technicalScore.js";
+
 export type TradeAction = "buy" | "sell" | "hold";
 
 export interface SignalRow {
@@ -62,18 +64,22 @@ export interface PriceBarRow {
   v: number;
 }
 
-export interface DiscoveryRow {
-  id: string;
+/**
+ * Scored symbol row for Alpaca news search UI (computed in the TUI, not a discovery pipeline).
+ */
+export interface AlpacaSearchScoredSymbol {
   symbol: string;
-  discoveredAt: string;
-  source: string;
+  source: "news" | "trending" | "volume" | "momentum";
   technicalScore: number;
   sentimentScore: number;
   hybridScore: number;
+  price: number;
+  volume24h: number;
+  newsCount: number;
+  smaFast: number | null;
+  smaSlow: number | null;
+  rsi: number | null;
   rankScore: number;
-  priceAtDiscovery: number;
-  action: TradeAction;
-  invested: boolean;
-  investedAt: string | null;
-  notes: string | null;
+  reason: string;
+  technicalBreakdown?: TechnicalScoreResult;
 }
