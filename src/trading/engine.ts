@@ -6,7 +6,7 @@ import { submitOrder, type SubmitOrderResult } from "../actions/alpaca.js";
 import type { Decision } from "../actions/types.js";
 import type { Config, Secrets } from "../config.js";
 import { resolveTradingDatabasePath } from "../config.js";
-import type { BrokerAdapter, NewsItem, Position, PriceBar } from "../execution/broker.js";
+import type { AccountSummary, BrokerAdapter, NewsItem, Position, PriceBar } from "../execution/broker.js";
 import type { LogService } from "../services/logService.js";
 import { aggregateNewsSentiment, getLocalClassifier } from "./sentiment/finbert.js";
 import { checkTradingReadiness, type ReadinessResult } from "./readiness.js";
@@ -114,7 +114,8 @@ export class TradingEngine {
    * Warm local FinBERT when enabled; records status for the TUI.
    */
   async warmSentimentModel(): Promise<void> {
-    if (this.config.sentiment.provider !== "local_finbert") {
+    const p = this.config.sentiment.provider;
+    if (p !== "local_finbert" && p !== "hybrid_finbert") {
       this.status.sentimentModelOk = true;
       this.status.sentimentError = null;
       this.refreshReadiness();
@@ -327,7 +328,7 @@ export class TradingEngine {
       strat,
       newsItemCount,
       lastClose,
-      account.equity,
+      account,
       hasPosition && pos ? pos.qty : 0,
     );
 
@@ -496,6 +497,33 @@ function describeSqliteLoadError(raw: string): string {
   return short.length < raw.length ? `${short}… ${hint}` : `${short} ${hint}`;
 }
 
+/** Map hybrid / buy_threshold from [-1, 1] to [0, 100] for conviction distance. */
+function hybridAxisTo100(value: number): number {
+  const v = ((value + 1) / 2) * 100;
+  return Math.max(0, Math.min(100, v));
+}
+
+/**
+ * Buy notional (USD) from cash balance and how far hybrid is above buy_threshold
+ * on a 0–100 axis: fraction = |score₁₀₀ − threshold₁₀₀| / 100.
+ * Then apply `[trading].positioning_scalar` and cap by `[risk].max_position_pct` of equity.
+ */
+export function computeBuyNotionalUsd(
+  config: Config,
+  hybridScore: number,
+  account: Pick<AccountSummary, "cash" | "equity">,
+): { notional: number; conviction: number; score100: number; threshold100: number } {
+  const threshold100 = hybridAxisTo100(config.strategy.simple.buy_threshold);
+  const score100 = hybridAxisTo100(hybridScore);
+  const conviction = Math.abs(score100 - threshold100) / 100;
+  const balance = Math.max(0, account.cash);
+  const scalar = config.trading.positioning_scalar ?? 1;
+  const raw = scalar * balance * conviction;
+  const cap = (Math.max(0, account.equity) * config.risk.max_position_pct) / 100;
+  const notional = Math.min(raw, cap);
+  return { notional, conviction, score100, threshold100 };
+}
+
 async function buildOrderDecision(
   config: Config,
   symbol: string,
@@ -504,7 +532,7 @@ async function buildOrderDecision(
   strat: ReturnType<typeof computeSimpleStrategy>,
   newsItemCount: number,
   lastClose: number,
-  equity: number,
+  account: AccountSummary,
   positionQty: number,
 ): Promise<Decision> {
   const reason = `hybrid=${strat.hybridScore.toFixed(3)} tech=${strat.technicalScore.toFixed(3)} news=${newsItemCount} rsi=${strat.rsiValue?.toFixed(1) ?? "—"}`;
@@ -519,7 +547,27 @@ async function buildOrderDecision(
     }
     return { action: "close", symbol, qty: q, reasoning: reason, confidence };
   }
-  const notional = (equity * config.risk.max_position_pct) / 100;
-  const qty = lastClose > 0 ? Math.max(1, Math.floor(notional / lastClose)) : 1;
-  return { action: "buy", symbol, qty, reasoning: reason, confidence };
+  const { notional, conviction, score100, threshold100 } = computeBuyNotionalUsd(
+    config,
+    strat.hybridScore,
+    account,
+  );
+  const sizeNote = `notional≈$${notional.toFixed(2)} (cash=$${Math.max(0, account.cash).toFixed(2)}×scalar=${config.trading.positioning_scalar ?? 1}×|${score100.toFixed(1)}−${threshold100.toFixed(1)}|/100=${conviction.toFixed(3)} cap=${config.risk.max_position_pct}%eq)`;
+  const qty = lastClose > 0 ? Math.floor(notional / lastClose) : 0;
+  if (qty < 1) {
+    return {
+      action: "hold",
+      symbol,
+      qty: 0,
+      reasoning: `${reason} · ${sizeNote} — below 1 share at last close`,
+      confidence,
+    };
+  }
+  return {
+    action: "buy",
+    symbol,
+    qty,
+    reasoning: `${reason} · ${sizeNote}`,
+    confidence,
+  };
 }

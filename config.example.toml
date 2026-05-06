@@ -39,6 +39,19 @@ enabled = true
 # paper | live — also sets broker platform to alpaca_paper or alpaca_live when using Alpaca.
 mode = "paper"
 database_path = "~/.config/trading-cli/trades.db"
+#
+# Buy size (simple engine, market buys): uses cash balance, not full equity.
+#   score_100     = (hybrid + 1) * 50     — hybrid ∈ [-1, 1] from strategy.simple
+#   threshold_100 = (buy_threshold + 1) * 50   — same [strategy.simple] buy_threshold
+#   conviction    = |score_100 − threshold_100| / 100   (larger when hybrid is far above the buy line)
+#   notional_usd  = min(
+#       positioning_scalar * cash * conviction,
+#       equity * max_position_pct / 100
+#     )
+#   shares        = floor(notional_usd / last_close)  (hold if 0 — notional too small for 1 share)
+#
+# positioning_scalar: global dial on that dollar amount (default 1). Use e.g. 0.5 to invest half as much.
+positioning_scalar = 1.0
 
 [strategy.simple]
 enabled = true
@@ -53,10 +66,18 @@ rsi_period = 14
 sma_neutral_band = 0.001
 
 [sentiment]
-# local_finbert / huggingface_api / disabled. Prefer ProsusAI/finbert as id; local Node pulls Xenova/finbert (ONNX).
+# local_finbert | hybrid_finbert | huggingface_api | disabled
+# - local_finbert: Transformers.js ONNX on disk (see Config → Models → Download).
+# - huggingface_api: HF Inference only — set HF_TOKEN in .env (https://huggingface.co/settings/tokens).
+# - hybrid_finbert: mix API + local; hf_api_runs_* = "numerator of denominator" symbol-level sentiment batches use API first.
+#   On HTTP 429 the app falls back to local FinBERT for ~90s (see src/trading/sentiment/finbert.ts).
+# Prefer ProsusAI/finbert as model_id; local Node resolves to Xenova/finbert (ONNX).
 provider = "local_finbert"
 model_id = "ProsusAI/finbert"
 cache_ttl_hours = 24
+# Hybrid only: e.g. 1 / 2 = half the batches try HF Inference first (then local if rate-limited or no token).
+hf_api_runs_numerator = 1
+hf_api_runs_denominator = 2
 
 [schedule]
 # Seconds between agent cycles
@@ -73,7 +94,8 @@ min_confidence_to_trade = 0.6
 stop_loss_pct = 2.0
 take_profit_pct = 5.0
 
-# At least one ticker is required — the simple strategy only trades symbols you list here.
+# Your tradable universe — not built into the app; replace with any tickers you want evaluated.
+# At least one symbol is required. Same list is editable in the TUI (Insights or Config → Trading).
 [watchlist]
 symbols = ["SPY", "QQQ"]
 

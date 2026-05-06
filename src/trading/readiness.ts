@@ -47,13 +47,32 @@ export function checkTradingReadiness(
     }
   }
 
-  if (config.sentiment.provider === "local_finbert" && !config.sentiment.model_id.trim()) {
-    issues.push("sentiment.model_id is empty for local FinBERT.");
+  if (
+    (config.sentiment.provider === "local_finbert" || config.sentiment.provider === "hybrid_finbert") &&
+    !config.sentiment.model_id.trim()
+  ) {
+    issues.push("sentiment.model_id is empty for FinBERT (local or hybrid fallback).");
   }
   if (config.sentiment.provider === "huggingface_api" && !secrets.HF_TOKEN?.trim()) {
     issues.push("sentiment.provider is huggingface_api but HF_TOKEN is missing.");
   }
-  if (config.sentiment.provider === "local_finbert" && opts.sentimentModelLoadFailed) {
+  if (config.sentiment.provider === "hybrid_finbert") {
+    const den = Math.max(1, config.sentiment.hf_api_runs_denominator);
+    const num = Math.min(config.sentiment.hf_api_runs_numerator, den);
+    if (num >= den && !secrets.HF_TOKEN?.trim()) {
+      issues.push(
+        "sentiment.provider is hybrid_finbert with API on every batch, but HF_TOKEN is missing — set it in .env or Config → Secrets.",
+      );
+    } else if (!secrets.HF_TOKEN?.trim()) {
+      warnings.push(
+        "Hybrid FinBERT: HF_TOKEN missing — API slots use local ONNX only (read/write HF_TOKEN in .env).",
+      );
+    }
+  }
+  if (
+    (config.sentiment.provider === "local_finbert" || config.sentiment.provider === "hybrid_finbert") &&
+    opts.sentimentModelLoadFailed
+  ) {
     warnings.push(`FinBERT: ${opts.sentimentModelLoadFailed} — sentiment treated as 0.`);
   }
 

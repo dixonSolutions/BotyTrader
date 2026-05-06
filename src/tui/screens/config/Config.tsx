@@ -1,6 +1,6 @@
 /**
  * Config container — sub-tabbed editor for everything writable.
- * Tabs: Settings · Trading · Models (FinBERT) · Secrets · Schedule. Global search is pointer-driven.
+ * Tabs: Settings · Trading · Models · Indicators · Optimize · Secrets · Schedule. Global search is pointer-driven.
  */
 
 import React, { useMemo, useState } from "react";
@@ -17,6 +17,7 @@ import { SecretsEditor } from "./SecretsEditor.js";
 import { SettingsEditor } from "./SettingsEditor.js";
 import { ScheduleEditor } from "./ScheduleEditor.js";
 import { TradingEditor } from "./TradingEditor.js";
+import { FinbertModelsEditor } from "./FinbertModelsEditor.js";
 import { IndicatorsEditor } from "./IndicatorsEditor.js";
 import { OptimizationEditor } from "./OptimizationEditor.js";
 import type { Orchestrator, OrchestratorState } from "../../../orchestrator.js";
@@ -27,6 +28,7 @@ type ConfigTab = ConfigTabId;
 const TABS: readonly TabItem<ConfigTab>[] = [
   { id: "settings", label: "Settings", icon: icons.bullet },
   { id: "trading", label: "Trading", icon: icons.bullet },
+  { id: "models", label: "Models", icon: icons.bullet },
   { id: "indicators", label: "Indicators", icon: icons.bullet },
   { id: "optimize", label: "Optimize", icon: icons.bullet },
   { id: "secrets", label: "Secrets", icon: icons.bullet },
@@ -82,7 +84,7 @@ export function Config({ orchestrator, state, onBack }: Props): React.ReactEleme
       <ScrollRegion>
         <ScreenFrame
           title="Config"
-          subtitle="Settings, trading, indicators, optimizer, secrets, and schedules — persisted to config.toml / .env."
+          subtitle="Settings, trading, models (FinBERT), indicators, optimizer, secrets, and schedules — persisted to config.toml / .env."
         >
         <Box marginBottom={1} flexDirection="row" flexWrap="wrap">
           <Button
@@ -116,6 +118,15 @@ export function Config({ orchestrator, state, onBack }: Props): React.ReactEleme
             orchestrator={orchestrator}
             active={editorActive("trading")}
             focusRowId={tab === "trading" ? focusRowId : null}
+            onFocusRowConsumed={() => setFocusRowId(null)}
+          />
+        ) : null}
+        {!globalSearchOpen && tab === "models" ? (
+          <FinbertModelsEditor
+            orchestrator={orchestrator}
+            trading={state.trading}
+            active={editorActive("models")}
+            focusRowId={tab === "models" ? focusRowId : null}
             onFocusRowConsumed={() => setFocusRowId(null)}
           />
         ) : null}
@@ -204,9 +215,11 @@ function GlobalSearchOverlay({
               ? "Settings"
               : h.tab === "trading"
                 ? "Trading"
-                : h.tab === "indicators"
-                  ? "Indicators"
-                  : h.tab === "optimize"
+                : h.tab === "models"
+                  ? "Models"
+                  : h.tab === "indicators"
+                    ? "Indicators"
+                    : h.tab === "optimize"
                       ? "Optimize"
                       : h.tab === "secrets"
                         ? "Secrets"

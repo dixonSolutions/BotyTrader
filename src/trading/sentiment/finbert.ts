@@ -68,6 +68,42 @@ interface CachedClassifier {
 
 let cached: CachedClassifier | null = null;
 
+/** Monotonic batch counter for `hybrid_finbert` API vs local scheduling (one step per `aggregateNewsSentiment` call). */
+let hybridBatchRunCounter = 0;
+
+/** After HF Inference returns HTTP 429 / rate limit, avoid remote calls until this timestamp (ms). */
+let hfApiRateLimitBackoffUntil = 0;
+
+const HF_API_BACKOFF_MS = 90_000;
+
+function isHfRateLimitError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/429|rate limit|too many requests|quota/i.test(msg)) return true;
+  const o = err as { status?: number; statusCode?: number };
+  const s = typeof o?.status === "number" ? o.status : typeof o?.statusCode === "number" ? o.statusCode : null;
+  return s === 429;
+}
+
+/**
+ * Whether this news-sentiment batch should call HF Inference (hybrid mode only;
+ * pure `huggingface_api` ignores this — scoreHeadline uses provider alone).
+ */
+export function shouldUseRemoteFinbertThisBatch(config: Config, secrets: Secrets): boolean {
+  if (config.sentiment.provider !== "hybrid_finbert") return false;
+  const den = Math.max(1, Math.floor(config.sentiment.hf_api_runs_denominator));
+  const num = Math.max(0, Math.min(Math.floor(config.sentiment.hf_api_runs_numerator), den));
+  if (num === 0) return false;
+  if (num >= den) {
+    return !!secrets.HF_TOKEN?.trim() && Date.now() >= hfApiRateLimitBackoffUntil;
+  }
+  const slot = hybridBatchRunCounter % den;
+  hybridBatchRunCounter += 1;
+  if (slot >= num) return false;
+  if (!secrets.HF_TOKEN?.trim()) return false;
+  if (Date.now() < hfApiRateLimitBackoffUntil) return false;
+  return true;
+}
+
 async function applySentimentTransformersCache(config: Config): Promise<void> {
   const { env } = await import("@huggingface/transformers");
   const cache = resolveModelCacheDir(config, resolvePaths());
@@ -338,12 +374,86 @@ export async function removeLocalSentimentArtifacts(config: Config): Promise<{ p
   return { path: dir, removed: true };
 }
 
+export type ScoreHeadlineOpts = {
+  onProgress?: (m: string) => void;
+  /**
+   * Set by `aggregateNewsSentiment` for `hybrid_finbert`: this batch should try HF Inference first.
+   * Ignored for other providers.
+   */
+  preferRemoteApi?: boolean;
+};
+
+async function classifyViaHfInference(
+  config: Config,
+  secrets: Secrets,
+  repo: TradingRepositories,
+  trimmed: string,
+  h: string,
+  ttlMs: number,
+): Promise<ScoredHeadline> {
+  const token = secrets.HF_TOKEN?.trim();
+  if (!token) {
+    return { text: trimmed, score: 0, label: "neutral", confidence: null, fromCache: false };
+  }
+  const hf = new HfInference(token);
+  const out = await hf.textClassification({
+    model: config.sentiment.model_id,
+    inputs: trimmed,
+  });
+  const { score, label, confidence } = mapClassificationArray(out);
+  repo.setSentimentCache({
+    headlineHash: h,
+    headline: trimmed,
+    modelId: config.sentiment.model_id,
+    label,
+    score,
+    confidence,
+    ttlMs,
+  });
+  return { text: trimmed, score, label, confidence, fromCache: false };
+}
+
+async function classifyViaLocalFinbert(
+  config: Config,
+  secrets: Secrets,
+  repo: TradingRepositories,
+  trimmed: string,
+  h: string,
+  ttlMs: number,
+  onProgress?: (m: string) => void,
+): Promise<ScoredHeadline> {
+  syncHubTokenFromSecrets(secrets);
+  const pipe = await getLocalClassifier(config, onProgress);
+  const raw = await pipe(trimmed);
+  const mapped = mapFinbertProbs(raw);
+  const score = mapped.label === "positive" ? 1 : mapped.label === "negative" ? -1 : 0;
+  const soft = typeof (raw as { score?: number })?.score === "number" && mapped.label
+    ? mapped.label === "positive"
+      ? (raw as { score: number }).score
+      : mapped.label === "negative"
+        ? -(raw as { score: number }).score
+        : 0
+    : score;
+  const finalScore = clampSoft(soft);
+
+  repo.setSentimentCache({
+    headlineHash: h,
+    headline: trimmed,
+    modelId: config.sentiment.model_id,
+    label: mapped.label,
+    score: finalScore,
+    confidence: mapped.confidence,
+    ttlMs,
+  });
+  return { text: trimmed, score: finalScore, label: mapped.label, confidence: mapped.confidence, fromCache: false };
+}
+
 export async function scoreHeadline(
   config: Config,
   secrets: Secrets,
   repo: TradingRepositories,
   text: string,
-  opts: { onProgress?: (m: string) => void } = {},
+  opts: ScoreHeadlineOpts = {},
 ): Promise<ScoredHeadline> {
   const trimmed = text.trim();
   if (!trimmed) {
@@ -366,56 +476,43 @@ export async function scoreHeadline(
     return { text: trimmed, score: 0, label: "neutral", confidence: null, fromCache: false };
   }
 
-  if (config.sentiment.provider === "huggingface_api") {
-    const token = secrets.HF_TOKEN?.trim();
-    if (!token) {
-      return { text: trimmed, score: 0, label: "neutral", confidence: null, fromCache: false };
-    }
-    const hf = new HfInference(token);
-    const out = await hf.textClassification({
-      model: config.sentiment.model_id,
-      inputs: trimmed,
-    });
-    const { score, label, confidence } = mapClassificationArray(out);
-    repo.setSentimentCache({
-      headlineHash: h,
-      headline: trimmed,
-      modelId: config.sentiment.model_id,
-      label,
-      score,
-      confidence,
-      ttlMs,
-    });
-    return { text: trimmed, score, label, confidence, fromCache: false };
+  const token = secrets.HF_TOKEN?.trim();
+  const wantsRemote =
+    config.sentiment.provider === "huggingface_api" ||
+    (config.sentiment.provider === "hybrid_finbert" && opts.preferRemoteApi === true);
+  const canHitRemote = !!token && Date.now() >= hfApiRateLimitBackoffUntil;
+
+  if (config.sentiment.provider === "huggingface_api" && !token) {
+    return { text: trimmed, score: 0, label: "neutral", confidence: null, fromCache: false };
   }
 
-  // local_finbert
-  try {
-    syncHubTokenFromSecrets(secrets);
-    const pipe = await getLocalClassifier(config, opts.onProgress);
-    const raw = await pipe(trimmed);
-    const mapped = mapFinbertProbs(raw);
-    const score = mapped.label === "positive" ? 1 : mapped.label === "negative" ? -1 : 0;
-    // Prefer soft score if we only have single label+score
-    const soft = typeof (raw as { score?: number })?.score === "number" && mapped.label
-      ? mapped.label === "positive"
-        ? (raw as { score: number }).score
-        : mapped.label === "negative"
-          ? -(raw as { score: number }).score
-          : 0
-      : score;
-    const finalScore = clampSoft(soft);
+  if (wantsRemote && canHitRemote) {
+    try {
+      return await classifyViaHfInference(config, secrets, repo, trimmed, h, ttlMs);
+    } catch (err) {
+      if (isHfRateLimitError(err)) {
+        hfApiRateLimitBackoffUntil = Date.now() + HF_API_BACKOFF_MS;
+        opts.onProgress?.(
+          `HF Inference rate limited — ${Math.round(HF_API_BACKOFF_MS / 1000)}s cooldown; using local FinBERT.`,
+        );
+      } else {
+        opts.onProgress?.(`HF Inference error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      // Fall through to local when possible (hybrid, or huggingface_api fallback after remote failure).
+    }
+  }
 
-    repo.setSentimentCache({
-      headlineHash: h,
-      headline: trimmed,
-      modelId: config.sentiment.model_id,
-      label: mapped.label,
-      score: finalScore,
-      confidence: mapped.confidence,
-      ttlMs,
-    });
-    return { text: trimmed, score: finalScore, label: mapped.label, confidence: mapped.confidence, fromCache: false };
+  const useLocal =
+    config.sentiment.provider === "local_finbert" ||
+    config.sentiment.provider === "hybrid_finbert" ||
+    config.sentiment.provider === "huggingface_api";
+
+  if (!useLocal) {
+    return { text: trimmed, score: 0, label: "neutral", confidence: null, fromCache: false };
+  }
+
+  try {
+    return await classifyViaLocalFinbert(config, secrets, repo, trimmed, h, ttlMs, opts.onProgress);
   } catch (err) {
     opts.onProgress?.(`Sentiment error: ${err instanceof Error ? err.message : String(err)}`);
     return { text: trimmed, score: 0, label: "neutral", confidence: null, fromCache: false };
@@ -476,12 +573,13 @@ export async function aggregateNewsSentiment(
   }
   const max = opts.maxItems ?? 10;
   const slice = headlines.slice(0, max);
+  const preferRemoteApi = shouldUseRemoteFinbertThisBatch(config, secrets);
   let wSum = 0;
   let sSum = 0;
   const now = Date.now();
   for (let i = 0; i < slice.length; i++) {
     const t = slice[i]!;
-    const sc = await scoreHeadline(config, secrets, repo, t.title, opts);
+    const sc = await scoreHeadline(config, secrets, repo, t.title, { ...opts, preferRemoteApi });
     const ageH = (now - Date.parse(t.publishedAt)) / 3_600_000;
     const w = 1 / (1 + Math.max(0, ageH) * 0.1) * (1 / (i + 1));
     wSum += w;

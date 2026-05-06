@@ -1,6 +1,6 @@
 {
   "name": "botytrader",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Terminal-based AI trading assistant — Ink TUI, local or Hugging Face Inference ReAct agent, MCP tools, broker adapters, RAG memory.",
   "type": "module",
   "license": "MIT",

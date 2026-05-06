@@ -40,6 +40,14 @@ import type { PreviousSessionSummary } from "./runtime/session_snapshot.js";
 
 export type { PreviousSessionSummary } from "./runtime/session_snapshot.js";
 
+import { runCycle } from "./agent/loop.js";
+import { submitOrder } from "./actions/alpaca.js";
+import { summarizeToMemory } from "./actions/memory.js";
+import { DisabledMemoryStore, type WorkingMemoryStore } from "./memory/disabled_store.js";
+import { MemoryStore } from "./memory/store.js";
+import { GeminiEmbedder } from "./memory/embedder.js";
+import { HfBucket } from "./memory/hf.js";
+
 export interface LogEntry {
   ts: string;
   level: "info" | "warn" | "error" | "agent";
@@ -111,6 +119,7 @@ export class Orchestrator {
   private lastOptimizationLocalDayKey: string | null = null;
   private optimizationInFlight = false;
   private tradingCycleInFlight = false;
+  private agentCycleInFlight = false;
   private paused = false;
 
   constructor(opts: OrchestratorOptions) {
@@ -166,6 +175,30 @@ export class Orchestrator {
     this.startPingLoop();
     this.scheduleTradingCycles();
     this.startOptimizationTimers();
+
+    // `setInterval` does not run until the first delay elapses — without this, new
+    // watchlist symbols would not be evaluated until `candidate_cycle_seconds` (often 30m).
+    if (this.config.trading.enabled) {
+      void this.runStartupCandidateCycle();
+    }
+  }
+
+  /** One immediate watchlist pass so Insights / SQLite reflect every symbol without waiting on the candidate timer. */
+  private async runStartupCandidateCycle(): Promise<void> {
+    if (this.tradingCycleInFlight) return;
+    this.tradingCycleInFlight = true;
+    this.update({ tradingBusy: true });
+    try {
+      this.log("info", "Startup: running one candidate cycle for the full watchlist (timers fire later)…");
+      await this.tradingEngine.runCandidateCycle();
+      await this.refreshAccount();
+    } catch (e) {
+      this.log("error", `Startup candidate cycle: ${describe(e)}`);
+    } finally {
+      this.tradingCycleInFlight = false;
+      this.update({ tradingBusy: false });
+      this.pushTradingState();
+    }
   }
 
   stop(): void {
@@ -276,6 +309,105 @@ export class Orchestrator {
   /** Manual ping — Insights footer hint binds this. */
   async pingNow(): Promise<void> {
     await this.measurePing();
+  }
+
+  /**
+   * Run one **ReAct LLM** cycle (tools + causal model → Final JSON decision) for a symbol.
+   * This is **not** the deterministic simple-strategy engine — use {@link runTradingNow} for that.
+   * Post-decision path: validated `submitOrder` + optional `summarizeToMemory` (same boundary as docs).
+   */
+  async runNow(symbol?: string): Promise<void> {
+    if (this.agentCycleInFlight) {
+      this.log("warn", "Agent cycle already running.");
+      return;
+    }
+    const raw = symbol?.trim();
+    const sym = (raw && raw.length > 0 ? raw : this.state.watchlist[0])?.toUpperCase();
+    if (!sym) {
+      this.log("warn", "runNow: no symbol (watchlist empty).");
+      return;
+    }
+
+    this.agentCycleInFlight = true;
+    const startedAt = new Date().toISOString();
+    this.log("info", `Manual agent cycle starting for ${sym}…`);
+
+    let memory: WorkingMemoryStore = new DisabledMemoryStore();
+    if (this.config.features.memory_enabled) {
+      const geminiKey = this.secrets.GEMINI_API_KEY;
+      const hfTok = this.secrets.HF_TOKEN;
+      if (geminiKey && hfTok) {
+        try {
+          const bucket = new HfBucket({
+            bucketName: this.config.huggingface.bucket_name,
+            endpoint: this.config.huggingface.endpoint,
+            region: this.config.huggingface.region,
+            token: hfTok,
+          });
+          const embedder = new GeminiEmbedder({
+            apiKey: geminiKey,
+            model: this.config.gemini.embedding_model,
+          });
+          const store = new MemoryStore({ bucket, embedder });
+          await store.sync();
+          memory = store;
+        } catch (e) {
+          this.log("warn", `Memory sync failed (${describe(e)}); continuing without RAG for this cycle.`);
+        }
+      } else {
+        this.log("warn", "Memory enabled but credentials incomplete; continuing without RAG for this cycle.");
+      }
+    }
+
+    try {
+      const ctx = { broker: this.broker, secrets: this.secrets };
+      const { decision, toolCalls } = await runCycle({
+        symbol: sym,
+        config: this.config,
+        secrets: this.secrets,
+        ctx,
+        memory,
+        onStep: (step) => {
+          if (step.kind === "decision") {
+            this.log(
+              "agent",
+              `${step.decision.action.toUpperCase()} ${step.decision.symbol} conf=${step.decision.confidence.toFixed(2)}`,
+            );
+          }
+        },
+      });
+      const finishedAt = new Date().toISOString();
+      this.log(
+        "info",
+        `Agent cycle complete: ${decision.action.toUpperCase()} ${decision.symbol} qty=${decision.qty} conf=${decision.confidence.toFixed(2)}`,
+      );
+
+      const submit = await submitOrder(decision, this.config, this.broker);
+      if (submit.submitted && submit.order) {
+        this.log("info", `Order submitted (${submit.order.id ?? "ok"}).`);
+        await this.refreshOrders();
+        this.recomputePerformance();
+      } else if (decision.action === "buy" || decision.action === "sell" || decision.action === "close") {
+        this.log("info", `Order not submitted: ${submit.reason ?? "unknown"}`);
+      }
+
+      if (memory instanceof MemoryStore) {
+        try {
+          await summarizeToMemory(
+            { symbol: sym, decision, toolCalls, startedAt, finishedAt },
+            memory,
+          );
+        } catch (e) {
+          this.log("warn", `Memory write failed: ${describe(e)}`);
+        }
+      }
+
+      await this.refreshAccount();
+    } catch (e) {
+      this.log("error", `Agent cycle: ${describe(e)}`);
+    } finally {
+      this.agentCycleInFlight = false;
+    }
   }
 
   /**
@@ -461,6 +593,13 @@ export class Orchestrator {
     this.pushTradingState();
   }
 
+  setTradingPositioningScalar(value: number): void {
+    if (!Number.isFinite(value)) return;
+    this.config.trading.positioning_scalar = Math.max(0, Math.min(10, value));
+    writeConfig(this.config);
+    this.pushTradingState();
+  }
+
   setTradingDatabasePath(p: string): void {
     this.config.trading.database_path = p.trim();
     writeConfig(this.config);
@@ -469,13 +608,29 @@ export class Orchestrator {
     this.pushTradingState();
   }
 
-  setSentimentConfig(patch: { provider: Config["sentiment"]["provider"]; modelId?: string; cacheTtlHours?: number }): void {
+  setSentimentConfig(patch: {
+    provider: Config["sentiment"]["provider"];
+    modelId?: string;
+    cacheTtlHours?: number;
+    hfApiRunsNumerator?: number;
+    hfApiRunsDenominator?: number;
+  }): void {
     const prevP = this.config.sentiment.provider;
     const prevM = this.config.sentiment.model_id;
     this.config.sentiment.provider = patch.provider;
     if (patch.modelId != null) this.config.sentiment.model_id = patch.modelId.trim();
     if (patch.cacheTtlHours != null && Number.isFinite(patch.cacheTtlHours) && patch.cacheTtlHours > 0) {
       this.config.sentiment.cache_ttl_hours = patch.cacheTtlHours;
+    }
+    if (patch.hfApiRunsNumerator != null && Number.isFinite(patch.hfApiRunsNumerator)) {
+      this.config.sentiment.hf_api_runs_numerator = Math.max(0, Math.min(20, Math.floor(patch.hfApiRunsNumerator)));
+    }
+    if (patch.hfApiRunsDenominator != null && Number.isFinite(patch.hfApiRunsDenominator)) {
+      this.config.sentiment.hf_api_runs_denominator = Math.max(1, Math.min(20, Math.floor(patch.hfApiRunsDenominator)));
+    }
+    const den = Math.max(1, this.config.sentiment.hf_api_runs_denominator);
+    if (this.config.sentiment.hf_api_runs_numerator > den) {
+      this.config.sentiment.hf_api_runs_numerator = den;
     }
     writeConfig(this.config);
     const rewarm = patch.provider !== prevP || (patch.modelId != null && patch.modelId.trim() !== prevM);
@@ -492,9 +647,8 @@ export class Orchestrator {
   }
 
   /**
-   * Pull FinBERT classification files into the local cache, then set
-   * `local_finbert` + official repo id and warm. Use when the engine reports
-   * sentiment not ready under local FinBERT.
+   * Pull FinBERT classification files into the local cache, set official `model_id`, and warm.
+   * Does not change `sentiment.provider` (e.g. stays `hybrid_finbert` if already selected).
    */
   async installSentimentFinbert(opts?: {
     onProgress?: (p: SentimentInstallProgress) => void;
@@ -505,7 +659,6 @@ export class Orchestrator {
     if (signal?.aborted) {
       throw new DOMException("Install cancelled", "AbortError");
     }
-    this.config.sentiment.provider = "local_finbert";
     this.config.sentiment.model_id = SUPPORTED_SENTIMENT_REPO_ID;
     writeConfig(this.config);
     await this.tradingEngine.warmSentimentModel();
@@ -539,6 +692,28 @@ export class Orchestrator {
       this.clearTradingTimers();
       this.scheduleTradingCycles();
     }
+  }
+
+  /** Exit monitor re-reads interval on restart — keeps timer aligned with config. */
+  setExitMonitorIntervalSeconds(seconds: number): void {
+    if (!Number.isFinite(seconds) || seconds < 1) return;
+    const s = Math.floor(seconds);
+    this.config.schedule.exit_monitor_interval_seconds = s;
+    writeConfig(this.config);
+    if (!this.paused) {
+      this.exitMonitor.stop();
+      this.exitMonitor.start();
+    }
+    this.log("info", `Exit monitor interval set to ${s}s`);
+  }
+
+  /** Persisted `[schedule].agent_interval_seconds` (ReAct / agent cadence when scheduled). */
+  setAgentIntervalSeconds(seconds: number): void {
+    if (!Number.isFinite(seconds) || seconds < 1) return;
+    const s = Math.floor(seconds);
+    this.config.schedule.agent_interval_seconds = s;
+    writeConfig(this.config);
+    this.log("info", `Agent cycle interval set to ${s}s`);
   }
 
   setOptimizationEnabled(enabled: boolean): void {

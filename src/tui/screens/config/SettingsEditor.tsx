@@ -21,7 +21,7 @@ import {
 } from "../../../config.js";
 import type { Orchestrator } from "../../../orchestrator.js";
 
-type FieldKind = "bool" | "number" | "enum" | "list";
+type FieldKind = "bool" | "number" | "enum";
 
 interface Field {
   id: string;
@@ -49,12 +49,6 @@ function buildFields(config: Orchestrator["config"]): Field[] {
       kind: "enum",
       value: config.broker.platform,
       options: BROKER_OPTIONS,
-    },
-    {
-      id: "watchlist",
-      label: "Symbols to trade (comma-separated)",
-      kind: "list",
-      value: config.watchlist.symbols.join(", "),
     },
     { id: "max_position_pct", label: "Max position %", kind: "number", value: String(config.risk.max_position_pct) },
     {
@@ -138,9 +132,6 @@ export function SettingsEditor({
     setDraft("");
 
     switch (field.id) {
-      case "watchlist":
-        if (raw) orchestrator.setWatchlist(raw.split(/[\s,]+/));
-        break;
       case "max_position_pct":
       case "min_confidence_to_trade":
       case "stop_loss_pct":

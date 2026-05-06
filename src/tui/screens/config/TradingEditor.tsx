@@ -27,6 +27,7 @@ type RowId =
   | "trading_enabled"
   | "trading_mode"
   | "db_path"
+  | "positioning_scalar"
   | "simple_enabled"
   | "tech_w"
   | "sent_w"
@@ -51,14 +52,39 @@ export function TradingEditor({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState(0);
+  /** Watchlist: Edit → field → Save / Cancel (pointer-first; typing uses the text field). */
+  const [watchlistEditing, setWatchlistEditing] = useState(false);
+  const [watchDraft, setWatchDraft] = useState(() => config.watchlist.symbols.join(", "));
   const consumeRef = useRef(onFocusRowConsumed);
   consumeRef.current = onFocusRowConsumed;
   void active;
+
+  const watchlistKey = config.watchlist.symbols.join("|");
+  useEffect(() => {
+    if (!watchlistEditing) {
+      setWatchDraft(config.watchlist.symbols.join(", "));
+    }
+  }, [watchlistKey, watchlistEditing]);
+
+  useEffect(() => {
+    if (focusRowId !== "watchlist") return;
+    setEditing(false);
+    setEditingRow(null);
+    setDraft("");
+    setWatchDraft(config.watchlist.symbols.join(", "));
+    setWatchlistEditing(true);
+    consumeRef.current?.();
+  }, [focusRowId, config.watchlist.symbols]);
 
   const rows: { id: RowId; label: string; value: string; desc?: string }[] = [
     { id: "trading_enabled", label: "Trading engine", value: "" },
     { id: "trading_mode", label: "Paper / live (Alpaca)", value: config.trading.mode },
     { id: "db_path", label: "SQLite database path", value: config.trading.database_path },
+    {
+      id: "positioning_scalar",
+      label: "Buy sizing scalar (× cash × conviction)",
+      value: String(config.trading.positioning_scalar ?? 1),
+    },
     { id: "simple_enabled", label: "Simple strategy", value: "" },
     { id: "tech_w", label: "Technical weight (0-1)", value: String(config.strategy.simple.technical_weight) },
     { id: "sent_w", label: "Sentiment weight (0-1)", value: String(config.strategy.simple.sentiment_weight) },
@@ -80,7 +106,18 @@ export function TradingEditor({
   }, [focusRowId, rows]);
 
   const TRADING_MODE_OPTIONS: readonly TradingMode[] = ["paper", "live"];
-  const SENT_PROVIDER_OPTIONS: readonly SentimentProvider[] = ["local_finbert", "disabled", "huggingface_api"];
+  const SENT_PROVIDER_OPTIONS: readonly SentimentProvider[] = [
+    "local_finbert",
+    "hybrid_finbert",
+    "huggingface_api",
+    "disabled",
+  ];
+  const SENT_PROVIDER_LABELS: Partial<Record<SentimentProvider, string>> = {
+    local_finbert: "Local ONNX",
+    hybrid_finbert: "Hybrid (API + local)",
+    huggingface_api: "HF API only",
+    disabled: "Off",
+  };
 
   function handleTradingModeChange(next: TradingMode): void {
     setBusy(true);
@@ -100,7 +137,34 @@ export function TradingEditor({
     }
   }
 
+  function cancelWatchlistEdit(): void {
+    setWatchDraft(config.watchlist.symbols.join(", "));
+    setWatchlistEditing(false);
+  }
+
+  function beginWatchlistEdit(): void {
+    setEditing(false);
+    setEditingRow(null);
+    setDraft("");
+    setWatchDraft(config.watchlist.symbols.join(", "));
+    setWatchlistEditing(true);
+  }
+
+  function saveWatchlist(): void {
+    const parts = watchDraft
+      .split(/[\s,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (parts.length === 0) {
+      setWatchDraft(config.watchlist.symbols.join(", "));
+      return;
+    }
+    orchestrator.setWatchlist(parts);
+    setWatchlistEditing(false);
+  }
+
   function startEdit(i: number): void {
+    if (watchlistEditing) return;
     const r = rows[i];
     if (!r) return;
     setSelected(i);
@@ -139,6 +203,9 @@ export function TradingEditor({
       switch (editingRow) {
         case "db_path":
           if (raw) orchestrator.setTradingDatabasePath(raw);
+          break;
+        case "positioning_scalar":
+          if (raw && Number.isFinite(n) && n >= 0) orchestrator.setTradingPositioningScalar(n);
           break;
         case "tech_w":
           if (raw && Number.isFinite(n)) orchestrator.setSimpleStrategyNumeric("technical_weight", n);
@@ -193,11 +260,62 @@ export function TradingEditor({
         ) : null}
         <Text color={theme.color.muted}>DB: {st.dbPath}</Text>
         <Text color={theme.color.muted}>
-          FinBERT: {orchestrator.config.sentiment.provider === "local_finbert" ? (st.sentimentModelOk ? "ok" : st.sentimentError ?? "error") : orchestrator.config.sentiment.provider}
+          FinBERT:{" "}
+          {orchestrator.config.sentiment.provider === "local_finbert" ||
+          orchestrator.config.sentiment.provider === "hybrid_finbert"
+            ? st.sentimentModelOk
+              ? "ok"
+              : st.sentimentError ?? "error"
+            : orchestrator.config.sentiment.provider}
           {" — "}
           repo <Text bold>{orchestrator.config.sentiment.model_id}</Text> (Config → Models)
         </Text>
       </Box>
+
+      <Box
+        borderStyle="round"
+        borderColor={theme.color.subtle}
+        paddingX={1}
+        paddingY={1}
+        marginBottom={1}
+        flexDirection="column"
+      >
+        <Text color={theme.color.muted}>Symbols to trade — persisted to config.toml [watchlist]</Text>
+        {!watchlistEditing ? (
+          <Box marginTop={1} flexDirection="row" flexWrap="wrap" alignItems="center">
+            <Box flexDirection="column" marginRight={1} flexGrow={1}>
+              <Text bold color={theme.color.text} wrap="truncate-end">
+                {config.watchlist.symbols.length > 0 ? config.watchlist.symbols.join(", ") : "—"}
+              </Text>
+            </Box>
+            <Button
+              label="Edit"
+              icon={icons.bullet}
+              onClick={beginWatchlistEdit}
+              variant="secondary"
+              minWidth={8}
+              disabled={busy}
+            />
+          </Box>
+        ) : (
+          <Box marginTop={1} flexDirection="column">
+            <Box borderStyle="round" borderColor={theme.color.accent} paddingX={1}>
+              <TextInput
+                value={watchDraft}
+                onChange={setWatchDraft}
+                onSubmit={saveWatchlist}
+                placeholder="Comma or space separated tickers"
+              />
+            </Box>
+            <Box marginTop={1} flexDirection="row" flexWrap="wrap">
+              <Button label="Save" icon={icons.check} onClick={saveWatchlist} variant="primary" minWidth={10} disabled={busy} />
+              <Text> </Text>
+              <Button label="Cancel" icon={icons.close} onClick={cancelWatchlistEdit} variant="ghost" minWidth={10} disabled={busy} />
+            </Box>
+          </Box>
+        )}
+      </Box>
+
       <Panel>
         {rows.map((r, i) => (
           <ClickableRow
@@ -205,13 +323,13 @@ export function TradingEditor({
             selected={i === selected}
             onClick={() => {
               if (busy) return;
-              if (editing) return;
+              if (editing || watchlistEditing) return;
               setSelected(i);
               startEdit(i);
             }}
           >
             <Box flexDirection="row" flexWrap="nowrap" alignItems="flex-start" width="100%">
-              <Box minWidth={10} width="52%" maxWidth={44} flexShrink={1}>
+              <Box minWidth={10} width="52%" flexShrink={1}>
                 <Text
                   wrap="truncate-end"
                   color={i === selected ? theme.color.accent : theme.color.text}
@@ -237,7 +355,8 @@ export function TradingEditor({
                     options={SENT_PROVIDER_OPTIONS}
                     value={config.sentiment.provider}
                     onChange={handleSentProviderChange}
-                    width={22}
+                    optionLabels={SENT_PROVIDER_LABELS}
+                    width={26}
                     disabled={busy}
                   />
                 ) : (
@@ -249,7 +368,7 @@ export function TradingEditor({
             </Box>
           </ClickableRow>
         ))}
-        {editing ? (
+        {editing && !watchlistEditing ? (
           <Box marginTop={1} flexDirection="row" flexWrap="wrap">
             <Text color={theme.color.primary}>Value: </Text>
             <TextInput value={draft} onChange={setDraft} onSubmit={commit} />

@@ -8,6 +8,7 @@ import type { Orchestrator } from "../../../orchestrator.js";
 export type ConfigTabId =
   | "settings"
   | "trading"
+  | "models"
   | "indicators"
   | "optimize"
   | "secrets"
@@ -32,7 +33,6 @@ function settingsHits(config: Orchestrator["config"]): ConfigSearchHit[] {
       valueHint: config.broker.platform,
       extra: `Platforms: ${BROKER_OPTIONS.join(", ")}`,
     },
-    { rowId: "watchlist", label: "Symbols to trade (comma-separated)", valueHint: config.watchlist.symbols.join(", ") },
     { rowId: "max_position_pct", label: "Max position %", valueHint: String(config.risk.max_position_pct) },
     {
       rowId: "min_confidence_to_trade",
@@ -50,12 +50,46 @@ function settingsHits(config: Orchestrator["config"]): ConfigSearchHit[] {
   }));
 }
 
+function modelsHits(config: Orchestrator["config"]): ConfigSearchHit[] {
+  const s = config.sentiment;
+  return [
+    {
+      tab: "models",
+      rowId: "finbert_models",
+      title: "FinBERT — download & ONNX cache",
+      subtitle: `Provider: ${s.provider} · model_id: ${s.model_id}`,
+    },
+    {
+      tab: "models",
+      rowId: "finbert_routing",
+      title: "FinBERT — API vs local (HF_TOKEN)",
+      subtitle: `Hybrid API ratio: ${s.hf_api_runs_numerator}/${s.hf_api_runs_denominator} batches`,
+    },
+    {
+      tab: "models",
+      rowId: "hf_token",
+      title: "HF_TOKEN (Hugging Face access token)",
+      subtitle: "Set in .env or Config → Secrets — required for API / hybrid API slots",
+    },
+  ];
+}
+
 function tradingHits(config: Orchestrator["config"]): ConfigSearchHit[] {
   const s = config.strategy.simple;
   const rows: { rowId: string; label: string; valueHint: string }[] = [
+    {
+      rowId: "watchlist",
+      label: "Symbols to trade (comma-separated)",
+      valueHint: config.watchlist.symbols.join(", "),
+    },
     { rowId: "trading_enabled", label: "Trading engine", valueHint: String(config.trading.enabled) },
     { rowId: "trading_mode", label: "Paper / live (Alpaca)", valueHint: config.trading.mode },
     { rowId: "db_path", label: "SQLite database path", valueHint: config.trading.database_path },
+    {
+      rowId: "positioning_scalar",
+      label: "Buy sizing scalar (trading)",
+      valueHint: String(config.trading.positioning_scalar ?? 1),
+    },
     { rowId: "simple_enabled", label: "Simple strategy", valueHint: String(s.enabled) },
     { rowId: "tech_w", label: "Technical weight", valueHint: String(s.technical_weight) },
     { rowId: "sent_w", label: "Sentiment weight", valueHint: String(s.sentiment_weight) },
@@ -82,6 +116,7 @@ function secretsHits(): ConfigSearchHit[] {
 }
 
 function scheduleHits(config: Orchestrator["config"]): ConfigSearchHit[] {
+  const o = config.optimization ?? {};
   return [
     {
       tab: "schedule" as const,
@@ -100,6 +135,30 @@ function scheduleHits(config: Orchestrator["config"]): ConfigSearchHit[] {
       rowId: "candidate",
       title: "Candidate / watchlist cycle (seconds)",
       subtitle: `Current: ${config.schedule.candidate_cycle_seconds}s`,
+    },
+    {
+      tab: "schedule" as const,
+      rowId: "agent_interval",
+      title: "Agent / LLM cycle interval (seconds)",
+      subtitle: `Current: ${config.schedule.agent_interval_seconds}s`,
+    },
+    {
+      tab: "schedule" as const,
+      rowId: "schedule_day",
+      title: "Optimizer run day (local)",
+      subtitle: `Current: ${o.schedule_day ?? "daily"}`,
+    },
+    {
+      tab: "schedule" as const,
+      rowId: "schedule_hour",
+      title: "Optimizer run hour (local, 0–23)",
+      subtitle: `Current: ${o.schedule_hour ?? 2}`,
+    },
+    {
+      tab: "schedule" as const,
+      rowId: "outcome_interval",
+      title: "Optimizer outcome backfill (minutes)",
+      subtitle: `Current: ${o.outcome_monitor_interval_minutes ?? 30} min`,
     },
   ];
 }
@@ -124,12 +183,6 @@ function optimizationHits(config: Orchestrator["config"]): ConfigSearchHit[] {
       rowId: "learning_rate",
       title: "Optimizer — learning rate α",
       subtitle: `Current: ${o.learning_rate ?? 0.1}`,
-    },
-    {
-      tab: "optimize",
-      rowId: "schedule_day",
-      title: "Optimizer — schedule day",
-      subtitle: `Current: ${o.schedule_day ?? "daily"} @ hour ${o.schedule_hour ?? 2}`,
     },
     {
       tab: "optimize",
@@ -222,6 +275,7 @@ export function buildConfigSearchHits(orchestrator: Orchestrator): ConfigSearchH
   return [
     ...settingsHits(orchestrator.config),
     ...tradingHits(orchestrator.config),
+    ...modelsHits(orchestrator.config),
     ...indicatorsHits(orchestrator.config),
     ...optimizationHits(orchestrator.config),
     ...secretsHits(),

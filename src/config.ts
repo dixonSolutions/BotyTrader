@@ -75,7 +75,13 @@ export type ModelProvider = z.infer<typeof ModelProviderSchema>;
 export const TradingModeSchema = z.enum(["paper", "live"]);
 export type TradingMode = z.infer<typeof TradingModeSchema>;
 
-export const SentimentProviderSchema = z.enum(["local_finbert", "huggingface_api", "disabled"]);
+export const SentimentProviderSchema = z.enum([
+  "local_finbert",
+  "huggingface_api",
+  /** Mix of HF Inference API and local ONNX per `hf_api_runs_*` (see config.example.toml). */
+  "hybrid_finbert",
+  "disabled",
+]);
 export type SentimentProvider = z.infer<typeof SentimentProviderSchema>;
 
 export const ConfigSchema = z.object({
@@ -114,6 +120,11 @@ export const ConfigSchema = z.object({
       mode: TradingModeSchema.default("paper"),
       /** Default: ~/.config/trading-cli/trades.db — tilde expanded at resolve time. */
       database_path: z.string().min(1).default("~/.config/trading-cli/trades.db"),
+      /**
+       * Multiplier on conviction-sized buy notional (see config.example.toml [trading]).
+       * 1.0 = full formula; 0.5 = half the computed dollar amount per buy.
+       */
+      positioning_scalar: z.number().min(0).max(10).default(1),
     })
     .default({}),
   /** Simple technical + FinBERT hybrid strategy parameters. */
@@ -247,6 +258,22 @@ export const ConfigSchema = z.object({
       model_id: z.string().min(1).default("ProsusAI/finbert"),
       /** Hours until sentiment_cache rows are ignored (re-score). */
       cache_ttl_hours: z.number().positive().default(24),
+      /**
+       * When `provider === hybrid_finbert`: out of every `hf_api_runs_denominator`
+       * sentiment batches (one symbol’s news pass), use HF Inference for the first
+       * `hf_api_runs_numerator` batches. Example: 1 / 2 → API on half the batches.
+       */
+      hf_api_runs_numerator: z.number().int().min(0).max(20).default(1),
+      hf_api_runs_denominator: z.number().int().min(1).max(20).default(2),
+    })
+    .superRefine((s, ctx) => {
+      if (s.hf_api_runs_numerator > s.hf_api_runs_denominator) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "hf_api_runs_numerator must be <= hf_api_runs_denominator",
+          path: ["hf_api_runs_numerator"],
+        });
+      }
     })
     .default({}),
   schedule: z.object({
@@ -381,7 +408,7 @@ export type Secrets = z.infer<typeof SecretsSchema>;
 /** Human-readable description for each secret — surfaced in the TUI Setup wizard. */
 export const SECRET_DESCRIPTIONS: Record<keyof Secrets, string> = {
   HF_TOKEN:
-    "Hugging Face token — required for Inference API reasoning (model.provider = huggingface_api), gated local model downloads, and memory bucket writes when memory is enabled.",
+    "Hugging Face access token (https://huggingface.co/settings/tokens) — paste into .env as HF_TOKEN=... or Config → Secrets. Needed for sentiment via HF Inference (huggingface_api / hybrid_finbert API slots), reasoning when model.provider = huggingface_api, gated Hub downloads, and memory when enabled.",
   GEMINI_API_KEY:
     "Google Gemini API key — embeddings; required when features.memory_enabled is true (https://aistudio.google.com).",
   ALPACA_API_KEY: "Alpaca API key (paper or live, per config.toml).",

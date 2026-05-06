@@ -208,7 +208,7 @@ export function Insights({ orchestrator, state, onBack }: Props): React.ReactEle
               />
             </Box>
 
-            {/* Recent Agent Actions Card */}
+            {/* Compact recent signals card (same DB rows as table below) */}
             <RecentTradingSignals
               signals={state.recentTradingSignals}
               viewportRows={AGENT_ACTIONS_VIEWPORT}
@@ -239,16 +239,31 @@ export function Insights({ orchestrator, state, onBack }: Props): React.ReactEle
             {/* Details Section — Performance, Agent, Logs */}
             <ScreenFrame
               title="Details"
-              subtitle="Agent, performance, market context for the focused symbol, and logs."
+              subtitle="Algorithmic engine, optional LLM (ReAct), performance, market context, and logs."
             >
               <Box flexDirection="row" flexWrap="wrap" marginBottom={1}>
                 <Button
-                  label="Run agent"
+                  label="Algorithmic: run now"
+                  icon={icons.play}
+                  onClick={() => void orchestrator.runTradingNow()}
+                  disabled={state.tradingBusy || !orchestrator.config.trading.enabled}
+                  variant="primary"
+                  minWidth={22}
+                />
+                {state.tradingBusy ? (
+                  <Text color={theme.color.muted}>
+                    {" "}
+                    …
+                  </Text>
+                ) : null}
+                <Text> </Text>
+                <Button
+                  label="LLM: ReAct cycle"
                   icon={icons.play}
                   onClick={() => void orchestrator.runNow(state.watchlist[focusIdx])}
                   disabled={state.watchlist.length === 0}
-                  variant="primary"
-                  minWidth={14}
+                  variant="secondary"
+                  minWidth={18}
                 />
                 <Text> </Text>
                 <Button
@@ -260,22 +275,11 @@ export function Insights({ orchestrator, state, onBack }: Props): React.ReactEle
                 />
                 <Text> </Text>
                 <Button label="Ping" icon={icons.bullet} onClick={() => void orchestrator.pingNow()} variant="ghost" minWidth={8} />
-                <Text> </Text>
-                <Button
-                  label="Trade now"
-                  icon={icons.play}
-                  onClick={() => void orchestrator.runTradingNow()}
-                  disabled={state.tradingBusy || !orchestrator.config.trading.enabled}
-                  variant="secondary"
-                  minWidth={12}
-                />
-                {state.tradingBusy ? (
-                  <Text color={theme.color.muted}>
-                    {" "}
-                    …
-                  </Text>
-                ) : null}
               </Box>
+              <Text color={theme.color.muted}>
+                “Algorithmic” = SQLite simple strategy (portfolio + watchlist). “LLM: ReAct” = causal model tools +
+                JSON decision — not required for the engine.
+              </Text>
 
               <Text color={theme.color.muted}>
                 Simple strategy · {state.tradingMode} · engine {state.trading.ready ? "ready" : "blocked"}
@@ -315,27 +319,27 @@ export function Insights({ orchestrator, state, onBack }: Props): React.ReactEle
                 </Box>
                 <Box marginBottom={1}>
                   <Text color={theme.color.muted}>
-                    Manual triggers for testing agent cycles and the trading engine
+                    Manual triggers — algorithmic engine vs optional LLM (ReAct); same as the row above.
                   </Text>
                 </Box>
 
                 <Box flexDirection="row" flexWrap="wrap">
                   <Button
-                    label="Run agent now"
-                    icon={icons.play}
-                    onClick={() => void orchestrator.runNow(state.watchlist[focusIdx])}
-                    disabled={state.watchlist.length === 0}
-                    variant="primary"
-                    minWidth={16}
-                  />
-                  <Text> </Text>
-                  <Button
-                    label="Run trading now"
+                    label="Algorithmic: run now"
                     icon={icons.play}
                     onClick={() => void orchestrator.runTradingNow()}
                     disabled={state.tradingBusy || !orchestrator.config.trading.enabled}
+                    variant="primary"
+                    minWidth={20}
+                  />
+                  <Text> </Text>
+                  <Button
+                    label="LLM: ReAct cycle"
+                    icon={icons.play}
+                    onClick={() => void orchestrator.runNow(state.watchlist[focusIdx])}
+                    disabled={state.watchlist.length === 0}
                     variant="secondary"
-                    minWidth={16}
+                    minWidth={18}
                   />
                   <Text> </Text>
                   <Button
@@ -363,7 +367,8 @@ export function Insights({ orchestrator, state, onBack }: Props): React.ReactEle
       <Box flexShrink={0}>
         <Footer
           hints={[
-            "Wheel to scroll · Home has Alpaca Search · Back returns Home",
+            "Wheel to scroll · Change tickers under Config → Trading",
+            "Home has Alpaca Search · Back returns Home",
           ]}
         />
       </Box>

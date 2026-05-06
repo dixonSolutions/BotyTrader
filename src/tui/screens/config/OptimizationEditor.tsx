@@ -10,23 +10,9 @@ import { Button } from "../../components/Button.js";
 import { ClickableRow } from "../../components/ClickableRow.js";
 import { Panel, StatRow } from "../../components/Layout.js";
 import { Toggle } from "../../components/Toggle.js";
-import { Select } from "../../components/Select.js";
 import { icons } from "../../components/icons.js";
 import { theme } from "../../theme.js";
 import type { Orchestrator } from "../../../orchestrator.js";
-
-const SCHEDULE_DAYS = [
-  "daily",
-  "sunday",
-  "monday",
-  "tuesday",
-  "wednesday",
-  "thursday",
-  "friday",
-  "saturday",
-] as const;
-
-type ScheduleDay = (typeof SCHEDULE_DAYS)[number];
 
 interface Props {
   orchestrator: Orchestrator;
@@ -36,8 +22,6 @@ interface Props {
 }
 
 type RowId =
-  | "schedule_day"
-  | "schedule_hour"
   | "lookback"
   | "challengers"
   | "learning_rate"
@@ -46,12 +30,9 @@ type RowId =
   | "max_weight"
   | "exit_window"
   | "shadow_range"
-  | "min_snapshots"
-  | "outcome_interval";
+  | "min_snapshots";
 
 const ROWS: { id: RowId; label: string; hint?: string }[] = [
-  { id: "schedule_day", label: "Schedule day (click to cycle)" },
-  { id: "schedule_hour", label: "Run hour (local, 0–23)" },
   { id: "lookback", label: "Lookback days" },
   { id: "challengers", label: "Challenger count" },
   { id: "learning_rate", label: "Learning rate α (0–1)" },
@@ -61,16 +42,11 @@ const ROWS: { id: RowId; label: string; hint?: string }[] = [
   { id: "exit_window", label: "Snapshot outcome window (hours)" },
   { id: "shadow_range", label: "Shadow capture range (0–1)" },
   { id: "min_snapshots", label: "Min snapshots before optimize" },
-  { id: "outcome_interval", label: "Outcome backfill interval (min)" },
 ];
 
 function valueForRow(id: RowId, o: Orchestrator): string {
   const c = o.config.optimization;
   switch (id) {
-    case "schedule_day":
-      return c.schedule_day;
-    case "schedule_hour":
-      return String(c.schedule_hour);
     case "lookback":
       return String(c.lookback_days);
     case "challengers":
@@ -89,8 +65,6 @@ function valueForRow(id: RowId, o: Orchestrator): string {
       return String(c.shadow_capture_range);
     case "min_snapshots":
       return String(c.min_snapshots);
-    case "outcome_interval":
-      return String(c.outcome_monitor_interval_minutes);
     default:
       return "";
   }
@@ -123,8 +97,6 @@ export function OptimizationEditor({
     const row = ROWS[i];
     if (!row) return;
     setSelectedIdx(i);
-    // schedule_day is now handled by the inline Select component
-    if (row.id === "schedule_day") return;
     setEditing(true);
     setDraft(valueForRow(row.id, orchestrator));
   }
@@ -140,9 +112,6 @@ export function OptimizationEditor({
     }
     const id = row.id;
     switch (id) {
-      case "schedule_hour":
-        orchestrator.setOptimizationScheduleHour(n);
-        break;
       case "lookback":
         orchestrator.setOptimizationNumeric("lookback_days", n);
         break;
@@ -169,9 +138,6 @@ export function OptimizationEditor({
         break;
       case "min_snapshots":
         orchestrator.setOptimizationNumeric("min_snapshots", n);
-        break;
-      case "outcome_interval":
-        orchestrator.setOptimizationNumeric("outcome_monitor_interval_minutes", n);
         break;
       default:
         break;
@@ -203,6 +169,12 @@ export function OptimizationEditor({
         />
       </Box>
 
+      <Box marginBottom={1}>
+        <Text color={theme.color.muted}>
+          Run day, hour, and outcome backfill interval: Config → Schedule (Autonomous optimizer).
+        </Text>
+      </Box>
+
       {ROWS.map((row, i) => (
         <ClickableRow
           key={row.id}
@@ -223,16 +195,7 @@ export function OptimizationEditor({
               </Text>
             </Box>
             <Box marginLeft={1} flexShrink={0}>
-              {row.id === "schedule_day" ? (
-                <Select
-                  options={SCHEDULE_DAYS}
-                  value={config.optimization.schedule_day as ScheduleDay}
-                  onChange={(next) => orchestrator.setOptimizationScheduleDay(next)}
-                  width={14}
-                />
-              ) : (
-                <Text wrap="truncate-end">{valueForRow(row.id, orchestrator)}</Text>
-              )}
+              <Text wrap="truncate-end">{valueForRow(row.id, orchestrator)}</Text>
             </Box>
           </Box>
         </ClickableRow>

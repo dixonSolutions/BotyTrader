@@ -49,6 +49,8 @@ enabled = true
 # paper | live — for Alpaca, matches broker platform; Config → Trading or broker enum both update this.
 mode = "paper"
 database_path = "~/.config/trading-cli/trades.db"
+# Buy notional uses cash × conviction × positioning_scalar (see config.example.toml); default 1.0.
+positioning_scalar = 1.0
 
 [strategy.simple]
 enabled = true
@@ -62,10 +64,12 @@ rsi_period = 14
 sma_neutral_band = 0.001
 
 [sentiment]
-# local_finbert | disabled | huggingface_api (serverless, requires HF_TOKEN)
+# local_finbert | hybrid_finbert | huggingface_api | disabled (HF_TOKEN in .env for API / hybrid API slots)
 provider = "local_finbert"
-model_id = "Xenova/finbert"
+model_id = "ProsusAI/finbert"
 cache_ttl_hours = 24
+hf_api_runs_numerator = 1
+hf_api_runs_denominator = 2
 
 [risk]
 max_position_pct = 10.0

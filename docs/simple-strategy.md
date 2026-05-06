@@ -12,6 +12,20 @@ The simple strategy does three things:
 
 This strategy does **not** require embeddings or vector memory. It also does not require an LLM for reasoning. A reasoning LLM can be added later as a bounded context evaluator, but it should not be part of the first baseline.
 
+## Position sizing (buy orders)
+
+When the simple engine submits a **buy**, dollar notional is derived from **cash** (not total equity), how far the hybrid signal sits above the buy threshold on a 0–100 axis, and `[trading].positioning_scalar` (default `1.0`). The result is **capped** by `[risk].max_position_pct` of **equity** so a single name cannot exceed the legacy per-position ceiling.
+
+```text
+score_100     = clamp((hybrid + 1) * 50, 0, 100)
+threshold_100 = clamp((buy_threshold + 1) * 50, 0, 100)
+conviction    = |score_100 − threshold_100| / 100
+notional_usd  = min(positioning_scalar * cash * conviction, equity * max_position_pct / 100)
+shares        = floor(notional_usd / last_close)
+```
+
+If `shares < 1`, the engine emits **hold** for that cycle (notional too small for one share at the last close). Use `positioning_scalar` (e.g. `0.5`) to scale all buys down without changing thresholds.
+
 ## Strategy Formula
 
 ```text

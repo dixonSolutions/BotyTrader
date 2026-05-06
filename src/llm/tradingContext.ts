@@ -12,7 +12,8 @@
 import type { Config, Secrets } from "../config.js";
 import type { BrokerAdapter, NewsItem, Position, PriceBar } from "../execution/broker.js";
 import { aggregateNewsSentiment } from "../trading/sentiment/finbert.js";
-import { newsItemsForSymbol, TradingRepositories } from "../trading/storage/repositories.js";
+import { newsItemsForSymbol } from "../trading/storage/repositories.js";
+import type { TradingRepositories } from "../trading/storage/repositories.js";
 import { computeSimpleStrategy } from "../trading/strategy/simple.js";
 
 export interface TradingContext {
@@ -74,6 +75,8 @@ export interface AllocationContext {
   riskProfile: {
     maxPositionPct: number;
     minConfidence: number;
+    /** `[trading].positioning_scalar` — scales conviction-sized simple-engine buys. */
+    positioningScalar: number;
   };
 }
 
@@ -223,6 +226,7 @@ export async function buildAllocationContext(
     riskProfile: {
       maxPositionPct: config.risk.max_position_pct,
       minConfidence: config.risk.min_confidence_to_trade,
+      positioningScalar: config.trading.positioning_scalar,
     },
   };
 }
@@ -306,7 +310,8 @@ Total Invested: $${positionValue.toFixed(2)} (${positionPct.toFixed(1)}% of equi
 ${availableSymbols.map((s) => `  • ${s.symbol}: $${s.price.toFixed(2)} | Hybrid: ${s.hybridScore >= 0 ? "+" : ""}${s.hybridScore.toFixed(2)} | Rank: ${s.rankScore.toFixed(0)}/100 | News: ${s.newsCount}`).join("\n")}
 
 --- CONSTRAINTS ---
-Max Position Size: ${riskProfile.maxPositionPct}% of equity per stock
+Max Position Size: ${riskProfile.maxPositionPct}% of equity per stock (hard cap on simple-engine buy notional)
+Buy sizing scalar: ${riskProfile.positioningScalar}× (multiplies cash × conviction for deterministic buys)
 Min Confidence: ${(riskProfile.minConfidence * 100).toFixed(0)}%
 
 --- YOUR TASK ---
