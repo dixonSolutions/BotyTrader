@@ -26,6 +26,18 @@ shares        = floor(notional_usd / last_close)
 
 If `shares < 1`, the engine emits **hold** for that cycle (notional too small for one share at the last close). Use `positioning_scalar` (e.g. `0.5`) to scale all buys down without changing thresholds.
 
+### Two-threshold buys (optional)
+
+When `[strategy.simple] buy_trim_threshold` is **set** and **less than** `buy_threshold` (weaker bullish / lower hybrid on \([-1,1]\)):
+
+- **`hybrid > buy_threshold`** → buy with **full** notional from the usual `computeBuyNotionalUsd` formula (same as legacy).
+- **`buy_trim_threshold < hybrid ≤ buy_threshold`** → still **buy**, but **notional is multiplied** by a linear band fraction:  
+  `(hybrid − buy_trim_threshold) / (buy_threshold − buy_trim_threshold)`  
+  (then `floor` to whole shares as today). Weak edge of the band → smaller orders.
+- **`hybrid ≤ buy_trim_threshold`** → no buy from this band.
+
+When `buy_trim_threshold` is **omitted** (or not strictly below `buy_threshold`), buys only fire when **`hybrid > buy_threshold`** (legacy).
+
 ## Strategy Formula
 
 ```text
@@ -36,9 +48,27 @@ hybrid_signal = 0.6 * technical_score + 0.4 * sentiment_score
 |-----------|-------------|
 | `technical_score` | `0.5 * sma_crossover_score + 0.5 * rsi_score` |
 | `sentiment_score` | FinBERT weighted average across latest relevant news |
-| `BUY` | `hybrid_signal > +0.50` |
-| `SELL` | `hybrid_signal < -0.30` |
+| `BUY` (legacy) | `hybrid_signal > buy_threshold` only |
+| `BUY` (two-threshold) | optional `buy_trim_threshold` **<** `buy_threshold`: see “Two-threshold buys” above |
+| `SELL` (legacy) | `hybrid_signal < sell_threshold` only → **full** exit |
+| `SELL` (two-threshold) | optional `sell_trim_threshold` **>** `sell_threshold`: see below |
 | `HOLD` | otherwise |
+
+### Two-threshold sells (optional)
+
+When `[strategy.simple] sell_trim_threshold` is **set** and **greater than** `sell_threshold` (less bearish / closer to 0 on the hybrid axis):
+
+- **`hybrid ≤ sell_threshold`** → sell **100%** of the position (same as the legacy single line).
+- **`sell_threshold < hybrid < sell_trim_threshold`** → sell a **fraction** of shares, linear in hybrid:
+  - `fraction = (sell_trim_threshold − hybrid) / (sell_trim_threshold − sell_threshold)`
+  - `shares = floor(position_qty × fraction)`, at least 1 share when the fraction is non-zero and `position_qty ≥ 1`; if that rounds to zero shares, the engine **holds** for that cycle.
+- **`hybrid ≥ sell_trim_threshold`** → no strategy sell from this band.
+
+When `sell_trim_threshold` is **omitted** (or not strictly above `sell_threshold`), behavior matches the original model: **`hybrid < sell_threshold`** → full exit only (strict inequality, same as before).
+
+With two bands enabled, **`hybrid ≤ sell_threshold`** triggers a full exit (inclusive at the exit line).
+
+Stop-loss / take-profit (`ExitMonitor`) still close the **entire** position; they are unchanged by trim bands.
 
 Scores should be normalized to `[-1.0, +1.0]` before blending:
 

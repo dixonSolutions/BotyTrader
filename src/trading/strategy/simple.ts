@@ -40,6 +40,14 @@ export interface SimpleStrategyResult {
   hybridScore: number;
   /** Recommended action */
   action: "buy" | "sell" | "hold";
+  /**
+   * When `action === "sell"`: `null` = liquidate full position; `0..1` = sell that fraction of shares (two-threshold trim).
+   */
+  sellPositionFraction: number | null;
+  /**
+   * When `action === "buy"`: `null` = use full `computeBuyNotionalUsd` notional; `0..1` = multiply that notional by this fraction (buy trim band).
+   */
+  buyNotionalBandFraction: number | null;
   /** RSI value (for backward compatibility) */
   rsiValue: number | null;
   /** SMA fast value (for backward compatibility) */
@@ -137,13 +145,44 @@ export function computeSimpleStrategy(
   const wS = s.sentiment_weight;
   const hybrid = wT * technicalScore + wS * input.sentimentScore;
 
-  // Determine action
-  let action: "buy" | "sell" | "hold" = "hold";
-  if (hybrid > s.buy_threshold) action = "buy";
-  else if (hybrid < s.sell_threshold) action = "sell";
+  const buyEntry = s.buy_threshold;
+  const buyTrim = s.buy_trim_threshold;
+  const sellExit = s.sell_threshold;
+  const sellTrim = s.sell_trim_threshold;
 
-  // Signal classification
-  const signal = technicalBreakdown?.signal ?? (hybrid > 0.5 ? "buy" : hybrid < -0.3 ? "sell" : "neutral");
+  let action: "buy" | "sell" | "hold" = "hold";
+  let sellPositionFraction: number | null = null;
+  let buyNotionalBandFraction: number | null = null;
+
+  if (buyTrim !== undefined && buyTrim < buyEntry) {
+    if (hybrid > buyEntry) {
+      action = "buy";
+    } else if (hybrid > buyTrim) {
+      action = "buy";
+      buyNotionalBandFraction = (hybrid - buyTrim) / (buyEntry - buyTrim);
+    }
+  } else if (hybrid > buyEntry) {
+    action = "buy";
+  }
+
+  if (action !== "buy") {
+    if (sellTrim !== undefined && sellTrim > sellExit) {
+      if (hybrid <= sellExit) {
+        action = "sell";
+        sellPositionFraction = null;
+      } else if (hybrid < sellTrim) {
+        action = "sell";
+        sellPositionFraction = (sellTrim - hybrid) / (sellTrim - sellExit);
+      }
+    } else if (hybrid < sellExit) {
+      action = "sell";
+      sellPositionFraction = null;
+    }
+  }
+
+  const signal =
+    technicalBreakdown?.signal ??
+    (hybrid > 0.5 ? "buy" : action === "sell" || hybrid < sellExit ? "sell" : "neutral");
   const confidence = technicalBreakdown?.confidence ?? 0.5;
   const summary = technicalBreakdown?.summary ?? [
     `SMA Cross: ${smaCross > 0 ? "bullish" : smaCross < 0 ? "bearish" : "neutral"}`,
@@ -154,6 +193,8 @@ export function computeSimpleStrategy(
     technicalScore,
     hybridScore: hybrid,
     action,
+    sellPositionFraction,
+    buyNotionalBandFraction,
     rsiValue: rsiVal,
     smaFast: fast,
     smaSlow: slow,
@@ -190,16 +231,10 @@ export function computeTechnicalOnly(
  * @returns True if buy conditions are met
  */
 export function shouldBuy(result: SimpleStrategyResult, config: Config): boolean {
-  const s = config.strategy.simple;
-  const hybrid = result.hybridScore;
   const confidence = result.confidence;
   const risk = config.risk;
-
-  // Must exceed buy threshold and have reasonable confidence
-  const aboveThreshold = hybrid >= s.buy_threshold;
-  const confident = confidence >= risk.min_confidence_to_trade * 0.8; // Slightly lower threshold for technical
-
-  return aboveThreshold && confident;
+  const confident = confidence >= risk.min_confidence_to_trade * 0.8;
+  return result.action === "buy" && confident;
 }
 
 /**
@@ -209,10 +244,6 @@ export function shouldBuy(result: SimpleStrategyResult, config: Config): boolean
  * @param config - Bot configuration with thresholds
  * @returns True if sell conditions are met
  */
-export function shouldSell(result: SimpleStrategyResult, config: Config): boolean {
-  const s = config.strategy.simple;
-  const hybrid = result.hybridScore;
-
-  // Must be below sell threshold
-  return hybrid <= s.sell_threshold;
+export function shouldSell(result: SimpleStrategyResult, _config: Config): boolean {
+  return result.action === "sell";
 }

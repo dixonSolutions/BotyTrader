@@ -15,7 +15,7 @@ import { Footer, Header, ScreenFrame } from "../components/Layout.js";
 import { icons } from "../components/icons.js";
 import { theme } from "../theme.js";
 
-export type HomeChoice = "config" | "insights" | "alpaca_search" | "debugging";
+export type HomeChoice = "config" | "insights" | "alpaca_search";
 
 interface Props {
   brokerName: string;
@@ -29,7 +29,7 @@ const ORDER: { id: HomeChoice; label: string; description: string; icon: string 
     id: "insights",
     label: "Insights",
     icon: icons.bullet,
-    description: "Dashboard — vitals, trading cycles, performance, market, logs.",
+    description: "Portfolio tab (balances, holdings, orders) and Bot tab (signals, optimizer, actions, debug logs).",
   },
   {
     id: "alpaca_search",
@@ -43,12 +43,6 @@ const ORDER: { id: HomeChoice; label: string; description: string; icon: string 
     icon: icons.bullet,
     description: "Settings, trading, indicators, optimizer, secrets, schedules — full configuration.",
   },
-  {
-    id: "debugging",
-    label: "Debugging",
-    icon: icons.debug,
-    description: "Run trading or optimizer agents in isolation with real-time detailed logs.",
-  },
 ];
 
 export function Home({ brokerName, connected, onChoose, onQuit }: Props): React.ReactElement {
@@ -57,12 +51,12 @@ export function Home({ brokerName, connected, onChoose, onQuit }: Props): React.
       <Box flexShrink={0}>
         <Header breadcrumb={[]} brokerName={brokerName} connected={connected} />
       </Box>
-      <ScrollRegion>
-        <ScreenFrame title="Welcome" subtitle="Choose where you want to go.">
-          <Box flexDirection="column">
-            <Box flexDirection="row" flexWrap="wrap">
+      <ScrollRegion centerContentWhenFits>
+        <ScreenFrame title="" subtitle="">
+          <Box flexDirection="column" alignItems="center" width="100%">
+            <Box flexDirection="row" flexWrap="wrap" justifyContent="center" width="100%">
               {ORDER.map((o) => (
-                <Box key={o.id} marginRight={2} marginBottom={1}>
+                <Box key={o.id} marginX={1} marginBottom={1}>
                   <LaunchCard
                     label={o.label}
                     description={o.description}
@@ -72,7 +66,7 @@ export function Home({ brokerName, connected, onChoose, onQuit }: Props): React.
                 </Box>
               ))}
             </Box>
-            <Box marginTop={1}>
+            <Box marginTop={1} alignItems="center" justifyContent="center" width="100%">
               <Button
                 label="Quit"
                 icon={icons.close}
@@ -87,7 +81,7 @@ export function Home({ brokerName, connected, onChoose, onQuit }: Props): React.
       <Box flexShrink={0}>
         <Footer
           hints={[
-            "Click a card — Insights, Alpaca Search, Config, or Debugging",
+            "Click a card — Insights, Alpaca Search, or Config",
             "Wheel scrolls the main pane when content is tall",
             "Click Quit to exit — typing stays for search fields in other screens",
           ]}

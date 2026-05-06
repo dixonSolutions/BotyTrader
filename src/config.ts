@@ -136,7 +136,19 @@ export const ConfigSchema = z.object({
           technical_weight: z.number().min(0).max(1).default(0.6),
           sentiment_weight: z.number().min(0).max(1).default(0.4),
           buy_threshold: z.number().default(0.5),
+          /**
+           * Optional “soft” buy band (hybrid on [-1,1], must be **less** than `buy_threshold`).
+           * When set: between `buy_trim_threshold` and `buy_threshold` → scale **buy notional** linearly up to the usual formula at the top of the band; `hybrid > buy_threshold` → full notional. When omitted, only `hybrid > buy_threshold` triggers a buy (legacy).
+           */
+          buy_trim_threshold: z.number().optional(),
+          /** Hybrid at or below this → sell entire position (when trim is unset, same as legacy single sell line). */
           sell_threshold: z.number().default(-0.3),
+          /**
+           * Optional “soft” sell band (hybrid on [-1,1], must be **greater** than `sell_threshold`).
+           * When set: between `sell_trim_threshold` and `sell_threshold` → scale sell size linearly;
+           * at or below `sell_threshold` → full exit. When omitted, only `hybrid < sell_threshold` triggers a full sell.
+           */
+          sell_trim_threshold: z.number().optional(),
           sma_fast_period: z.number().int().positive().default(20),
           sma_slow_period: z.number().int().positive().default(50),
           rsi_period: z.number().int().positive().default(14),

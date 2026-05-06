@@ -93,8 +93,18 @@ function tradingHits(config: Orchestrator["config"]): ConfigSearchHit[] {
     { rowId: "simple_enabled", label: "Simple strategy", valueHint: String(s.enabled) },
     { rowId: "tech_w", label: "Technical weight", valueHint: String(s.technical_weight) },
     { rowId: "sent_w", label: "Sentiment weight", valueHint: String(s.sentiment_weight) },
-    { rowId: "buy_th", label: "Buy threshold", valueHint: String(s.buy_threshold) },
-    { rowId: "sell_th", label: "Sell threshold", valueHint: String(s.sell_threshold) },
+    { rowId: "buy_th", label: "Buy threshold hybrid", valueHint: String(s.buy_threshold) },
+    {
+      rowId: "buy_trim_th",
+      label: "Buy trim hybrid (optional)",
+      valueHint: s.buy_trim_threshold !== undefined ? String(s.buy_trim_threshold) : "unset",
+    },
+    { rowId: "sell_th", label: "Sell exit (full) hybrid", valueHint: String(s.sell_threshold) },
+    {
+      rowId: "sell_trim_th",
+      label: "Sell trim hybrid (optional)",
+      valueHint: s.sell_trim_threshold !== undefined ? String(s.sell_trim_threshold) : "unset",
+    },
     { rowId: "sent_provider", label: "Sentiment provider", valueHint: config.sentiment.provider },
   ];
   return rows.map((r) => ({

@@ -330,7 +330,37 @@ export class TradingEngine {
       lastClose,
       account,
       hasPosition && pos ? pos.qty : 0,
+      strat.sellPositionFraction,
+      strat.buyNotionalBandFraction,
     );
+
+    if (decision.action === "hold" && action === "sell") {
+      repo.insertSignal({
+        symbol: sym,
+        technicalScore: strat.technicalScore,
+        sentimentScore,
+        hybridScore: strat.hybridScore,
+        action: "sell",
+        executed: false,
+        rejectionReason: decision.reasoning,
+      });
+      this.logTrading("debug", `${sym}: sell not placed — ${decision.reasoning}`);
+      return;
+    }
+
+    if (decision.action === "hold" && action === "buy") {
+      repo.insertSignal({
+        symbol: sym,
+        technicalScore: strat.technicalScore,
+        sentimentScore,
+        hybridScore: strat.hybridScore,
+        action: "buy",
+        executed: false,
+        rejectionReason: decision.reasoning,
+      });
+      this.logTrading("debug", `${sym}: buy not placed — ${decision.reasoning}`);
+      return;
+    }
 
     const signalId = repo.insertSignal({
       symbol: sym,
@@ -468,7 +498,7 @@ export class TradingEngine {
   }
 
   // ---------------------------------------------------------------------------
-  // Internal log helpers — push to the LogService bus so the Debugging screen
+  // Internal log helpers — push to the LogService bus so Insights → Bot debugging
   // receives fine-grained messages without touching the orchestrator state.
   // ---------------------------------------------------------------------------
 
@@ -534,6 +564,8 @@ async function buildOrderDecision(
   lastClose: number,
   account: AccountSummary,
   positionQty: number,
+  sellPositionFraction: number | null,
+  buyNotionalBandFraction: number | null,
 ): Promise<Decision> {
   const reason = `hybrid=${strat.hybridScore.toFixed(3)} tech=${strat.technicalScore.toFixed(3)} news=${newsItemCount} rsi=${strat.rsiValue?.toFixed(1) ?? "—"}`;
 
@@ -545,14 +577,33 @@ async function buildOrderDecision(
     if (q <= 0) {
       return { action: "hold", symbol, qty: 0, reasoning: `${reason} (no position)`, confidence };
     }
-    return { action: "close", symbol, qty: q, reasoning: reason, confidence };
+    const fullExit = sellPositionFraction == null || sellPositionFraction >= 1 - 1e-9;
+    const rawQty = fullExit ? q : Math.floor(q * sellPositionFraction);
+    const sellQty = fullExit ? q : rawQty < 1 ? 0 : Math.min(rawQty, q);
+    if (sellQty < 1) {
+      return {
+        action: "hold",
+        symbol,
+        qty: 0,
+        reasoning: `${reason} · partial sell rounds to <1 share (have ${q})`,
+        confidence,
+      };
+    }
+    const frac = sellPositionFraction ?? 1;
+    const sellNote = fullExit ? "sell 100% of position" : `sell ~${(frac * 100).toFixed(1)}% → ${sellQty}/${q} sh`;
+    return { action: "close", symbol, qty: sellQty, reasoning: `${reason} · ${sellNote}`, confidence };
   }
-  const { notional, conviction, score100, threshold100 } = computeBuyNotionalUsd(
-    config,
-    strat.hybridScore,
-    account,
-  );
-  const sizeNote = `notional≈$${notional.toFixed(2)} (cash=$${Math.max(0, account.cash).toFixed(2)}×scalar=${config.trading.positioning_scalar ?? 1}×|${score100.toFixed(1)}−${threshold100.toFixed(1)}|/100=${conviction.toFixed(3)} cap=${config.risk.max_position_pct}%eq)`;
+  const buyBase = computeBuyNotionalUsd(config, strat.hybridScore, account);
+  let notional = buyBase.notional;
+  const { conviction, score100, threshold100 } = buyBase;
+  const trimFrac = buyNotionalBandFraction;
+  let trimmed = false;
+  if (trimFrac != null && trimFrac < 1 - 1e-9) {
+    notional *= trimFrac;
+    trimmed = true;
+  }
+  const trimNote = trimmed && trimFrac != null ? ` × buyTrim=${(trimFrac * 100).toFixed(1)}%` : "";
+  const sizeNote = `notional≈$${notional.toFixed(2)} (cash=$${Math.max(0, account.cash).toFixed(2)}×scalar=${config.trading.positioning_scalar ?? 1}×|${score100.toFixed(1)}−${threshold100.toFixed(1)}|/100=${conviction.toFixed(3)} cap=${config.risk.max_position_pct}%eq)${trimNote}`;
   const qty = lastClose > 0 ? Math.floor(notional / lastClose) : 0;
   if (qty < 1) {
     return {

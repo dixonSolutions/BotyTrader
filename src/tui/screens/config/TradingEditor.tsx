@@ -32,7 +32,9 @@ type RowId =
   | "tech_w"
   | "sent_w"
   | "buy_th"
+  | "buy_trim_th"
   | "sell_th"
+  | "sell_trim_th"
   | "sma_fast"
   | "sma_slow"
   | "rsi"
@@ -88,8 +90,26 @@ export function TradingEditor({
     { id: "simple_enabled", label: "Simple strategy", value: "" },
     { id: "tech_w", label: "Technical weight (0-1)", value: String(config.strategy.simple.technical_weight) },
     { id: "sent_w", label: "Sentiment weight (0-1)", value: String(config.strategy.simple.sentiment_weight) },
-    { id: "buy_th", label: "Buy threshold", value: String(config.strategy.simple.buy_threshold) },
-    { id: "sell_th", label: "Sell threshold", value: String(config.strategy.simple.sell_threshold) },
+    { id: "buy_th", label: "Buy threshold hybrid >", value: String(config.strategy.simple.buy_threshold) },
+    {
+      id: "buy_trim_th",
+      label: "Buy trim hybrid > (optional)",
+      value:
+        config.strategy.simple.buy_trim_threshold !== undefined
+          ? String(config.strategy.simple.buy_trim_threshold)
+          : "—",
+      desc: "Must be < buy threshold. Empty on save clears.",
+    },
+    { id: "sell_th", label: "Sell exit (full) hybrid ≤", value: String(config.strategy.simple.sell_threshold) },
+    {
+      id: "sell_trim_th",
+      label: "Sell trim hybrid < (optional)",
+      value:
+        config.strategy.simple.sell_trim_threshold !== undefined
+          ? String(config.strategy.simple.sell_trim_threshold)
+          : "—",
+      desc: "Must be > exit. Empty on save clears.",
+    },
     { id: "sma_fast", label: "SMA fast period", value: String(config.strategy.simple.sma_fast_period) },
     { id: "sma_slow", label: "SMA slow period", value: String(config.strategy.simple.sma_slow_period) },
     { id: "rsi", label: "RSI period", value: String(config.strategy.simple.rsi_period) },
@@ -216,8 +236,16 @@ export function TradingEditor({
         case "buy_th":
           if (raw && Number.isFinite(n)) orchestrator.setSimpleStrategyNumeric("buy_threshold", n);
           break;
+        case "buy_trim_th":
+          if (!raw.trim()) orchestrator.setSimpleStrategyBuyTrimThreshold(undefined);
+          else if (Number.isFinite(n)) orchestrator.setSimpleStrategyBuyTrimThreshold(n);
+          break;
         case "sell_th":
           if (raw && Number.isFinite(n)) orchestrator.setSimpleStrategyNumeric("sell_threshold", n);
+          break;
+        case "sell_trim_th":
+          if (!raw.trim()) orchestrator.setSimpleStrategySellTrimThreshold(undefined);
+          else if (Number.isFinite(n)) orchestrator.setSimpleStrategySellTrimThreshold(n);
           break;
         case "sma_neutral":
           if (raw && Number.isFinite(n)) orchestrator.setSimpleStrategyNumeric("sma_neutral_band", n);

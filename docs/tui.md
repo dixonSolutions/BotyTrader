@@ -14,16 +14,16 @@ The TUI **displays** orchestrator and agent state and sends **intents** to the o
 
 | Area | Purpose |
 |------|--------|
-| **Home** | Choose **Insights** or **Config**; **Quit** exits the app. |
+| **Home** | Choose **Insights**, **Alpaca Search**, or **Config**; **Quit** exits the app. |
 | **Setup** | First-run / missing `.env` keys — masked `TextInput` for each key. |
-| **Insights** | Dashboard: vitals, agent activity, performance, positions, market context, system logs. Toolbar buttons for run/pause/ping, focus symbol, log viewport. |
+| **Insights** | **Portfolio** tab: summary strip, vitals, balances, holdings, recent orders, performance, market context. **Bot** tab: DB signals, optimizer + engine status, actions (trading / optimizer / LLM / pause / ping), orchestrator logs, embedded trading vs optimizer log debugging. |
 | **Config** | Sub-tabs: **Settings**, **Trading**, **Models** (FinBERT [ProsusAI/finbert](https://huggingface.co/ProsusAI/finbert) only — provider, warm, agent blend ±), **Secrets**, **Schedule**. **Search all tabs** opens a global search panel; each sub-tab can **Filter** rows where shown. |
 
 ## Navigation
 
-- **Header** — On every screen except **Home**, **Back** is its **own row** under the chrome (secondary pill + icon) so it stays visible on dense dashboards; the next row is **BotyTrader** + breadcrumb and broker status. **Back** returns to **Home** from Insights / Config; on **Setup**, it goes to the previous secret step or exits on the first step (and matches **Continue** when there is nothing to configure). The divider uses live **`stdout.columns`**.
+- **Header** — On every screen except **Home**, **Back** is its **own row** under the chrome (secondary pill + icon) so it stays visible on dense dashboards; the next row is **BotyTrader** + breadcrumb and broker status. **Back** returns to **Home** from Insights / Config / Alpaca Search; on **Setup**, it goes to the previous secret step or exits on the first step (and matches **Continue** when there is nothing to configure). The divider uses live **`stdout.columns`**.
 - **Tabs** — click the pill for each Config sub-tab (Settings, Trading, Models, …).
-- **Home** — click a large card to open a route, or **Quit** to exit.
+- **Home** — click a large card to open a route, or **Quit** to exit. Channel log debugging is under **Insights → Bot** (not a separate Home card).
 
 No global keyboard shortcuts are documented for these flows; use the on-screen controls. Text fields continue to support normal keyboard entry and **Enter** to submit where `onSubmit` is wired on the text field.
 
@@ -40,7 +40,7 @@ No global keyboard shortcuts are documented for these flows; use the on-screen c
 
 ```
 src/tui/
-├── app.tsx                 ← root routing (Home, Insights, Config)
+├── app.tsx                 ← root routing (Home, Insights, Alpaca Search, Config)
 ├── theme.ts
 ├── components/
 │   ├── Layout.tsx          ← Header (Back), Footer, ScreenFrame, Panel
@@ -52,15 +52,16 @@ src/tui/
 └── screens/
     ├── Home.tsx
     ├── Setup.tsx
+    ├── debugging/          ← DebuggingPanel (embedded in Insights → Bot)
     ├── config/             ← Config, FinbertModelsEditor (Models tab), editors, …
-    └── insights/            ← Insights, VitalSigns, SystemLogs, …
+    └── insights/           ← Insights tabs, holdings, signals, RecentOrdersTable, …
 ```
 
 ## UX principles (project)
 
 - **Consistency:** Shared `Button` / `TabBarClickable` / `ClickableRow` and `theme` tokens.
 - **Hierarchy:** One clear title per screen; secondary info in panels.
-- **Chunking:** Toolbars grouped by function (agent vs logs) on Insights.
+- **Chunking:** Insights splits **Portfolio** vs **Bot**; actions and debug logs live on **Bot**.
 - **Feedback:** Show busy states where the orchestrator runs async work.
 
 ## Related docs

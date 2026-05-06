@@ -58,18 +58,23 @@ export function filterPositions(positions: Position[], q: string): Position[] {
 export function PortfolioSummary({
   positions,
   account,
+  heading = "Balances",
 }: {
   positions: Position[];
   account: AccountSummary | null;
+  /** Section title; pass empty string to omit. */
+  heading?: string;
 }): React.ReactElement {
   const totals = aggregatePositions(positions);
   const cur = account?.currency ?? "USD";
 
   return (
     <Box flexDirection="column" paddingX={1} paddingY={0}>
-      <Text bold color={theme.color.primary}>
-        Portfolio
-      </Text>
+      {heading ? (
+        <Text bold color={theme.color.primary}>
+          {heading}
+        </Text>
+      ) : null}
       <Box marginTop={0}>
         <Text color={theme.color.muted}>Positions market value</Text>
         <Text bold>{fmtMoney(totals.marketValue, cur)}</Text>
@@ -94,6 +99,10 @@ export function PortfolioSummary({
           <Box marginTop={0}>
             <Text color={theme.color.muted}>Account equity</Text>
             <Text bold>{fmtMoney(account.equity, cur)}</Text>
+          </Box>
+          <Box marginTop={0}>
+            <Text color={theme.color.muted}>Buying power</Text>
+            <Text bold>{fmtMoney(account.buyingPower, cur)}</Text>
           </Box>
         </>
       ) : (
@@ -212,7 +221,7 @@ export function Positions(props: {
 }): React.ReactElement {
   return (
     <Panel title="Active positions">
-      <PortfolioSummary positions={props.positions} account={props.account} />
+      <PortfolioSummary positions={props.positions} account={props.account} heading="Portfolio" />
       <PositionsCards
         positions={props.positions}
         symbolsFilter=""

@@ -1,6 +1,6 @@
 /**
  * Root Ink app — owns top-level routing between Home, Insights, Alpaca Search,
- * Config, and Debugging.
+ * and Config (live debugging lives under Insights → Bot).
  *
  * State subscription happens once here; child screens receive immutable
  * snapshots (Single Responsibility, predictable rendering).
@@ -13,7 +13,6 @@ import { AlpacaSearchScreen } from "./screens/AlpacaSearchScreen.js";
 import { Home, type HomeChoice } from "./screens/Home.js";
 import { Insights } from "./screens/insights/Insights.js";
 import { Config } from "./screens/config/Config.js";
-import { Debugging } from "./screens/debugging/Debugging.js";
 import type { Orchestrator, OrchestratorState } from "../orchestrator.js";
 import type { LogService } from "../services/logService.js";
 
@@ -21,7 +20,7 @@ type Route = "home" | HomeChoice;
 
 interface Props {
   orchestrator: Orchestrator;
-  /** Real-time log bus — created at bootstrap and passed through for the Debugging screen. */
+  /** Real-time log bus — Insights → Bot embeds channel debugging. */
   logService: LogService;
   initialRoute?: Route;
 }
@@ -75,22 +74,9 @@ export function App({ orchestrator, logService, initialRoute = "home" }: Props):
     );
   }
 
-  if (route === "debugging") {
-    return (
-      <Box flexDirection="column" flexGrow={1} minHeight={0}>
-        <Debugging
-          orchestrator={orchestrator}
-          state={state}
-          logService={logService}
-          onBack={goHome}
-        />
-      </Box>
-    );
-  }
-
   return (
     <Box flexDirection="column" flexGrow={1} minHeight={0}>
-      <Insights orchestrator={orchestrator} state={state} onBack={goHome} />
+      <Insights orchestrator={orchestrator} state={state} logService={logService} onBack={goHome} />
     </Box>
   );
 }

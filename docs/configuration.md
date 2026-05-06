@@ -57,7 +57,10 @@ enabled = true
 technical_weight = 0.6
 sentiment_weight = 0.4
 buy_threshold = 0.50
+# buy_trim_threshold = 0.35
+# Hybrid ≤ sell_threshold → full sell; optional sell_trim_threshold — see docs/simple-strategy.md.
 sell_threshold = -0.30
+# sell_trim_threshold = -0.15
 sma_fast_period = 20
 sma_slow_period = 50
 rsi_period = 14

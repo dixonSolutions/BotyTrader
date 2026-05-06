@@ -16,9 +16,19 @@ export interface ScrollRegionProps {
   children: React.ReactNode;
   /** When false, no gutter column (still scrolls). */
   showScrollbar?: boolean;
+  /**
+   * When the scroll body is taller than its content (nothing to scroll), stretch the inner
+   * track to the viewport height and vertically center children. Ignored once overflow scroll
+   * is needed so long pages stay top-aligned.
+   */
+  centerContentWhenFits?: boolean;
 }
 
-export function ScrollRegion({ children, showScrollbar = true }: ScrollRegionProps): React.ReactElement {
+export function ScrollRegion({
+  children,
+  showScrollbar = true,
+  centerContentWhenFits = false,
+}: ScrollRegionProps): React.ReactElement {
   const mouse = useMouse();
   const { stdout } = useStdout();
   const [scroll, setScroll] = useState(0);
@@ -43,7 +53,7 @@ export function ScrollRegion({ children, showScrollbar = true }: ScrollRegionPro
 
   useLayoutEffect(() => {
     syncLayout();
-  }, [children, stdout.columns, stdout.rows, syncLayout]);
+  }, [children, stdout.columns, stdout.rows, centerContentWhenFits, syncLayout]);
 
   useEffect(() => {
     const onScroll = (_pos: { x: number; y: number }, dir: "scrollup" | "scrolldown" | null) => {
@@ -68,11 +78,18 @@ export function ScrollRegion({ children, showScrollbar = true }: ScrollRegionPro
     barLines.push(i >= thumbStart && i < thumbStart + thumbH ? "█" : "░");
   }
   const barText = barLines.join("\n");
+  const center = centerContentWhenFits && maxScroll === 0;
 
   return (
     <Box flexDirection="row" flexGrow={1} minHeight={0} minWidth={0} ref={outerRef}>
       <Box flexDirection="column" flexGrow={1} minWidth={0} minHeight={0} overflow="hidden">
-        <Box marginTop={-scroll} ref={innerRef} flexDirection="column">
+        <Box
+          marginTop={-scroll}
+          ref={innerRef}
+          flexDirection="column"
+          minHeight={center ? viewH : undefined}
+          justifyContent={center ? "center" : "flex-start"}
+        >
           {children}
         </Box>
       </Box>

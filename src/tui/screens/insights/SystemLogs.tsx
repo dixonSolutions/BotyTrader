@@ -4,12 +4,17 @@
  */
 
 import { useMouse } from "@zenobius/ink-mouse";
-import { Box, Text } from "ink";
+import { Box, Text, useStdout, type DOMElement } from "ink";
 import { VirtualList, type VirtualListRef } from "ink-virtual-list";
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import type { RefObject } from "react";
 
+import { Button } from "../../components/Button.js";
 import { Panel } from "../../components/Layout.js";
+import { copyTextToClipboard } from "../../clipboard.js";
+import { icons } from "../../components/icons.js";
 import { theme } from "../../theme.js";
+import { cellInsideBounds, getTerminalCellBounds, type TerminalViewport } from "../../pointer/cellHit.js";
 import type { LogEntry } from "../../../orchestrator.js";
 
 interface Props {
@@ -20,6 +25,10 @@ interface Props {
   viewportLines?: number;
   /** Optional pager / actions rendered under the panel title. */
   toolbar?: React.ReactNode;
+  /** Hit box for wheel: scroll list only when pointer is inside (parent skips outer scroll). */
+  wheelCaptureRef?: RefObject<DOMElement | null>;
+  /** Keep parent `scrollOffset` in sync when the user wheels inside {@link wheelCaptureRef}. */
+  onWheelScrollOffsetChange?: (offset: number) => void;
 }
 
 /** Single log item for virtual list */
@@ -55,10 +64,28 @@ function logToItem(entry: LogEntry): LogItem {
   };
 }
 
-export function SystemLogs({ logs, scrollOffset, viewportLines = 14, toolbar }: Props): React.ReactElement {
+function formatLogsForExport(entries: LogEntry[]): string {
+  return entries.map((e) => `${e.ts} [${e.level}] ${e.message}`).join("\n");
+}
+
+export function SystemLogs({
+  logs,
+  scrollOffset,
+  viewportLines = 14,
+  toolbar,
+  wheelCaptureRef,
+  onWheelScrollOffsetChange,
+}: Props): React.ReactElement {
   const mouse = useMouse();
+  const { stdout } = useStdout();
   const listRef = useRef<VirtualListRef>(null);
+  const defaultCaptureRef = useRef<DOMElement | null>(null);
+  const captureRef = wheelCaptureRef ?? defaultCaptureRef;
+  const viewportRef = useRef<TerminalViewport>({ cols: 80, rows: 24 });
+  viewportRef.current = { cols: stdout.columns ?? 80, rows: stdout.rows ?? 24 };
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [copyHint, setCopyHint] = useState<string | null>(null);
+  const copyHintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Convert logs to items (newest first)
   const items = useMemo(() => {
@@ -75,13 +102,16 @@ export function SystemLogs({ logs, scrollOffset, viewportLines = 14, toolbar }: 
     listRef.current?.scrollToIndex(targetIndex);
   }, [scrollOffset, items.length, listHeight]);
 
-  /** Wheel scroll handler for virtual list navigation */
+  /** Wheel scroll — only when pointer is inside the log list box (see Insights outer scroll gate). */
   useEffect(() => {
-    const onScroll = (_pos: { x: number; y: number }, dir: "scrollup" | "scrolldown" | null) => {
+    const onScroll = (pos: { x: number; y: number }, dir: "scrollup" | "scrolldown" | null) => {
       if (dir === null || items.length === 0) return;
+      const box = getTerminalCellBounds(captureRef);
+      if (!box || !cellInsideBounds(box, pos.x, pos.y, viewportRef.current)) return;
       setSelectedIndex((prev) => {
         const newIndex = dir === "scrollup" ? Math.max(0, prev - 1) : Math.min(items.length - 1, prev + 1);
         listRef.current?.scrollToIndex(newIndex);
+        onWheelScrollOffsetChange?.(newIndex);
         return newIndex;
       });
     };
@@ -89,7 +119,7 @@ export function SystemLogs({ logs, scrollOffset, viewportLines = 14, toolbar }: 
     return () => {
       mouse.events.off("scroll", onScroll);
     };
-  }, [mouse.events, items.length]);
+  }, [mouse.events, items.length, captureRef, onWheelScrollOffsetChange]);
 
   const hi = logs.length === 0 ? 0 : Math.min(selectedIndex + listHeight, logs.length);
 
@@ -104,17 +134,48 @@ export function SystemLogs({ logs, scrollOffset, viewportLines = 14, toolbar }: 
     );
   }
 
+  useEffect(() => {
+    return () => {
+      if (copyHintTimer.current) clearTimeout(copyHintTimer.current);
+    };
+  }, []);
+
+  function handleCopy(): void {
+    const text = formatLogsForExport(logs);
+    const { ok, detail } = copyTextToClipboard(text);
+    if (copyHintTimer.current) clearTimeout(copyHintTimer.current);
+    setCopyHint(ok ? "Copied to clipboard." : `Copy failed: ${detail}`);
+    copyHintTimer.current = setTimeout(() => {
+      setCopyHint(null);
+      copyHintTimer.current = undefined;
+    }, 4000);
+  }
+
   return (
     <Panel title={`System logs ${logs.length ? `${selectedIndex + 1}–${hi}` : "0"} of ${logs.length}`}>
-      {toolbar ? (
-        <Box marginBottom={1} flexDirection="row" flexWrap="wrap">
-          {toolbar}
+      <Box marginBottom={1} flexDirection="row" flexWrap="wrap" alignItems="center">
+        <Button
+          label="Copy logs"
+          icon={icons.bullet}
+          onClick={() => handleCopy()}
+          disabled={logs.length === 0}
+          variant="secondary"
+          minWidth={14}
+        />
+        <Text> </Text>
+        {toolbar ? toolbar : null}
+      </Box>
+      {copyHint ? (
+        <Box marginBottom={1}>
+          <Text color={copyHint.startsWith("Copy failed") ? theme.color.warn : theme.color.success}>{copyHint}</Text>
         </Box>
       ) : null}
       {items.length === 0 ? (
-        <Text color={theme.color.muted}>No log entries yet.</Text>
+        <Box ref={captureRef}>
+          <Text color={theme.color.muted}>No log entries yet.</Text>
+        </Box>
       ) : (
-        <Box height={listHeight} flexDirection="column">
+        <Box ref={captureRef} height={listHeight} flexDirection="column">
           <VirtualList
             ref={listRef}
             items={items}

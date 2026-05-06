@@ -58,7 +58,12 @@ enabled = true
 technical_weight = 0.6
 sentiment_weight = 0.4
 buy_threshold = 0.5
+# Optional: must be < buy_threshold. Between trim and buy_threshold → scale buy notional linearly; > buy_threshold → full formula.
+# buy_trim_threshold = 0.35
+# Full exit when hybrid ≤ this (more bearish = lower number on [-1, 1]).
 sell_threshold = -0.3
+# Optional: must be > sell_threshold. Between trim and exit → partial sell (linear scale); ≤ exit → 100%.
+# sell_trim_threshold = -0.15
 sma_fast_period = 20
 sma_slow_period = 50
 rsi_period = 14

@@ -95,7 +95,7 @@ export interface OrchestratorOptions {
   secrets: Secrets;
   broker: BrokerAdapter;
   /** Optional real-time log bus. When supplied, every log entry is also pushed
-   *  to the LogService so the Debugging screen can stream it live. */
+   *  to the LogService so Insights → Bot can stream channel logs. */
   logService?: LogService;
 }
 
@@ -169,7 +169,6 @@ export class Orchestrator {
     await this.measurePing();
 
     await this.refreshAccount();
-    await this.refreshOrders();
 
     this.exitMonitor.start();
     this.startPingLoop();
@@ -385,8 +384,6 @@ export class Orchestrator {
       const submit = await submitOrder(decision, this.config, this.broker);
       if (submit.submitted && submit.order) {
         this.log("info", `Order submitted (${submit.order.id ?? "ok"}).`);
-        await this.refreshOrders();
-        this.recomputePerformance();
       } else if (decision.action === "buy" || decision.action === "sell" || decision.action === "close") {
         this.log("info", `Order not submitted: ${submit.reason ?? "unknown"}`);
       }
@@ -483,6 +480,60 @@ export class Orchestrator {
     this.config.strategy.simple[field] = value;
     writeConfig(this.config);
     this.pushTradingState();
+  }
+
+  /**
+   * Optional hybrid above `sell_threshold` where partial sells begin.
+   * Omit / clear to restore legacy single-threshold full exits only.
+   */
+  setSimpleStrategySellTrimThreshold(value: number | undefined): void {
+    const exit = this.config.strategy.simple.sell_threshold;
+    const simple = this.config.strategy.simple as { sell_trim_threshold?: number };
+    if (value === undefined) {
+      delete simple.sell_trim_threshold;
+      writeConfig(this.config);
+      this.pushTradingState();
+      this.log("info", "sell_trim_threshold cleared (full sell only when hybrid < sell_threshold).");
+      return;
+    }
+    if (!Number.isFinite(value) || value <= exit) {
+      this.log(
+        "warn",
+        `sell_trim_threshold must be > sell_threshold (${exit}); got ${value}. Ignored.`,
+      );
+      return;
+    }
+    simple.sell_trim_threshold = value;
+    writeConfig(this.config);
+    this.pushTradingState();
+    this.log("info", `sell_trim_threshold set to ${value} (partial band down to sell_threshold ${exit}).`);
+  }
+
+  /**
+   * Optional hybrid below `buy_threshold` where scaled buys begin (notional × band fraction).
+   * Omit / clear to restore legacy buys only when `hybrid > buy_threshold`.
+   */
+  setSimpleStrategyBuyTrimThreshold(value: number | undefined): void {
+    const entry = this.config.strategy.simple.buy_threshold;
+    const simple = this.config.strategy.simple as { buy_trim_threshold?: number };
+    if (value === undefined) {
+      delete simple.buy_trim_threshold;
+      writeConfig(this.config);
+      this.pushTradingState();
+      this.log("info", "buy_trim_threshold cleared (buys only when hybrid > buy_threshold).");
+      return;
+    }
+    if (!Number.isFinite(value) || value >= entry) {
+      this.log(
+        "warn",
+        `buy_trim_threshold must be < buy_threshold (${entry}); got ${value}. Ignored.`,
+      );
+      return;
+    }
+    simple.buy_trim_threshold = value;
+    writeConfig(this.config);
+    this.pushTradingState();
+    this.log("info", `buy_trim_threshold set to ${value} (partial buy band up to buy_threshold ${entry}).`);
   }
 
   setSimpleStrategyInt(
@@ -1010,35 +1061,26 @@ export class Orchestrator {
 
   private async refreshAccount(): Promise<void> {
     try {
-      const [account, positions] = await Promise.all([
+      const [account, positions, ordersMaybe] = await Promise.all([
         this.broker.getAccount(),
         this.broker.listPositions(),
+        this.broker.listOrders({ limit: ORDER_HISTORY_MAX }).catch((): null => null),
       ]);
+      const recentOrders = ordersMaybe ?? this.state.recentOrders;
       const sample: EquitySample = { ts: new Date().toISOString(), equity: account.equity };
       const equityHistory = [...this.state.equityHistory, sample].slice(-EQUITY_HISTORY_MAX);
+      const performance = computePerformance(equityHistory, recentOrders);
       this.update({
         account,
         positions,
         equityHistory,
+        recentOrders,
+        performance,
         recentTradingSignals: this.tradingEngine.listRecentSignals(60),
       });
     } catch (err) {
       this.log("warn", `Account refresh failed: ${describe(err)}`);
     }
-  }
-
-  private async refreshOrders(): Promise<void> {
-    try {
-      const orders = await this.broker.listOrders({ limit: ORDER_HISTORY_MAX });
-      this.update({ recentOrders: orders });
-    } catch {
-      // Non-fatal — older orders just stay shown until the next successful poll.
-    }
-  }
-
-  private recomputePerformance(): void {
-    const performance = computePerformance(this.state.equityHistory, this.state.recentOrders);
-    this.update({ performance });
   }
 
   // -------------------------------------------------------------------------
@@ -1061,7 +1103,7 @@ export class Orchestrator {
     const entry: LogEntry = { ts: new Date().toISOString(), level, message };
     const logs = [entry, ...this.state.logs].slice(0, LOG_BUFFER_MAX);
     this.update({ logs });
-    // Mirror to the real-time log service so the Debugging screen can stream it.
+    // Mirror to the real-time log service so Insights → Bot can stream it.
     this.logService?.push("system", level, message);
   }
 
