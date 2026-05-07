@@ -4,13 +4,14 @@
  */
 
 import { useMouse } from "@zenobius/ink-mouse";
-import { Box, Text, useStdout } from "ink";
+import { Box, Text, useStdout, type DOMElement } from "ink";
 import { VirtualList, type VirtualListRef } from "ink-virtual-list";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import { theme } from "../../theme.js";
 import type { SignalRow, TradeAction } from "../../../trading/types.js";
 import { formatInsightLocalShort } from "./insightFormatters.js";
+import { cellInsideBounds, getTerminalCellBounds, type TerminalViewport } from "../../pointer/cellHit.js";
 
 function scoreTxt(n: number | null): string {
   return n === null || Number.isNaN(n) ? "—" : n.toFixed(2);
@@ -78,6 +79,7 @@ interface Props {
   /** Resolved absolute path from config (shown when DB fails to open). */
   databasePath?: string;
   viewportRows: number;
+  wheelCaptureRef?: RefObject<DOMElement | null>;
 }
 
 export function TradingSignalsTable({
@@ -85,11 +87,16 @@ export function TradingSignalsTable({
   dbOpenError,
   databasePath,
   viewportRows,
+  wheelCaptureRef,
 }: Props): React.ReactElement {
   const { stdout } = useStdout();
   const mouse = useMouse();
   const cols = stdout.columns ?? 80;
   const listRef = useRef<VirtualListRef>(null);
+  const defaultWheelRef = useRef<DOMElement | null>(null);
+  const wheelRef = wheelCaptureRef ?? defaultWheelRef;
+  const viewportRef = useRef<TerminalViewport>({ cols: 80, rows: 24 });
+  viewportRef.current = { cols: stdout.columns ?? 80, rows: stdout.rows ?? 24 };
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const timeW = Math.min(22, Math.max(16, Math.floor(cols * 0.22)));
@@ -104,8 +111,11 @@ export function TradingSignalsTable({
 
   /** Wheel scroll handler for virtual list navigation */
   useEffect(() => {
-    const onScroll = (_pos: { x: number; y: number }, dir: "scrollup" | "scrolldown" | null) => {
+    const onScroll = (pos: { x: number; y: number }, dir: "scrollup" | "scrolldown" | null) => {
       if (dir === null || items.length === 0) return;
+      const box = getTerminalCellBounds(wheelRef);
+      if (!box || !cellInsideBounds(box, pos.x, pos.y, viewportRef.current)) return;
+
       setSelectedIndex((prev) => {
         if (dir === "scrollup") return Math.max(0, prev - 1);
         return Math.min(items.length - 1, prev + 1);
@@ -115,7 +125,7 @@ export function TradingSignalsTable({
     return () => {
       mouse.events.off("scroll", onScroll);
     };
-  }, [mouse.events, items.length]);
+  }, [mouse.events, items.length, wheelRef]);
 
   // Keep selected index in bounds
   useEffect(() => {
@@ -209,14 +219,14 @@ export function TradingSignalsTable({
 
   if (items.length === 0) {
     return (
-      <Box flexDirection="column" paddingX={1} paddingBottom={1}>
+      <Box ref={wheelRef as any} flexDirection="column" paddingX={1} paddingBottom={1}>
         {hint}
       </Box>
     );
   }
 
   return (
-    <Box flexDirection="column" paddingX={1} paddingBottom={1}>
+    <Box ref={wheelRef as any} flexDirection="column" paddingX={1} paddingBottom={1}>
       {hint}
       {renderHeader()}
       <Box height={listHeight} flexDirection="column">
@@ -226,7 +236,6 @@ export function TradingSignalsTable({
           height={listHeight}
           renderItem={renderItem}
           selectedIndex={selectedIndex}
-          showOverflowIndicators
         />
       </Box>
       {renderFooter()}

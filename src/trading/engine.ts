@@ -321,6 +321,31 @@ export class TradingEngine {
     }
     this.logTrading("info", `${sym}: signal ${action.toUpperCase()} — proceeding to order (confidence=${confidence.toFixed(2)})`);
 
+    let isFractionable = false;
+    if (this.broker.getAsset) {
+      try {
+        const asset = await this.broker.getAsset(sym);
+        isFractionable = asset?.fractionable === true;
+      } catch {
+        /* ignore — default false */
+      }
+    }
+
+    if (action === "buy" && this.config.trading.fractional_shares && !isFractionable) {
+      const rejection = "asset.fractionable is not true";
+      repo.insertSignal({
+        symbol: sym,
+        technicalScore: strat.technicalScore,
+        sentimentScore,
+        hybridScore: strat.hybridScore,
+        action: "buy",
+        executed: false,
+        rejectionReason: rejection,
+      });
+      this.logTrading("debug", `${sym}: buy not placed — ${rejection}`);
+      return;
+    }
+
     const account = await this.broker.getAccount();
     const decision = await buildOrderDecision(
       this.config,
@@ -334,6 +359,7 @@ export class TradingEngine {
       hasPosition && pos ? pos.qty : 0,
       strat.sellPositionFraction,
       strat.buyNotionalBandFraction,
+      isFractionable,
     );
 
     if (decision.action === "hold" && action === "sell") {
@@ -611,8 +637,10 @@ async function buildOrderDecision(
   positionQty: number,
   sellPositionFraction: number | null,
   buyNotionalBandFraction: number | null,
+  isFractionable: boolean,
 ): Promise<Decision> {
   const reason = `hybrid=${strat.hybridScore.toFixed(3)} tech=${strat.technicalScore.toFixed(3)} news=${newsItemCount} rsi=${strat.rsiValue?.toFixed(1) ?? "—"}`;
+  const allowFrac = config.trading.fractional_shares && isFractionable;
 
   if (action === "hold") {
     return { action: "hold", symbol, qty: 0, reasoning: reason, confidence };
@@ -623,20 +651,33 @@ async function buildOrderDecision(
       return { action: "hold", symbol, qty: 0, reasoning: `${reason} (no position)`, confidence };
     }
     const fullExit = sellPositionFraction == null || sellPositionFraction >= 1 - 1e-9;
-    const rawQty = fullExit ? q : Math.floor(q * sellPositionFraction);
-    const sellQty = fullExit ? q : rawQty < 1 ? 0 : Math.min(rawQty, q);
-    if (sellQty < 1) {
+    const rawQty = fullExit ? q : q * (sellPositionFraction ?? 1);
+    const sellQty = fullExit ? q : allowFrac ? rawQty : Math.floor(rawQty);
+    const isFractionalSell = sellQty % 1 !== 0;
+    const sellNotional = sellQty * lastClose;
+
+    if (sellQty <= 0 || (isFractionalSell && sellNotional < 1.0)) {
+      const minReason =
+        sellQty <= 0
+          ? "partial sell quantity is 0"
+          : `fractional sell notional $${sellNotional.toFixed(2)} < $1.00`;
       return {
         action: "hold",
         symbol,
         qty: 0,
-        reasoning: `${reason} · partial sell rounds to <1 share (have ${q})`,
+        reasoning: `${reason} · ${minReason} (have ${q})`,
         confidence,
       };
     }
     const frac = sellPositionFraction ?? 1;
     const sellNote = fullExit ? "sell 100% of position" : `sell ~${(frac * 100).toFixed(1)}% → ${sellQty}/${q} sh`;
-    return { action: "close", symbol, qty: sellQty, reasoning: `${reason} · ${sellNote}`, confidence };
+    return {
+      action: "close",
+      symbol,
+      qty: Math.min(sellQty, q),
+      reasoning: `${reason} · ${sellNote}`,
+      confidence,
+    };
   }
   const buyBase = computeBuyNotionalUsd(config, strat.hybridScore, account);
   let notional = buyBase.notional;
@@ -649,8 +690,22 @@ async function buildOrderDecision(
   }
   const trimNote = trimmed && trimFrac != null ? ` × buyTrim=${(trimFrac * 100).toFixed(1)}%` : "";
   const sizeNote = `notional≈$${notional.toFixed(2)} (cash=$${Math.max(0, account.cash).toFixed(2)}×scalar=${config.trading.positioning_scalar ?? 1}×|${score100.toFixed(1)}−${threshold100.toFixed(1)}|/100=${conviction.toFixed(3)} cap=${config.risk.max_position_pct}%eq)${trimNote}`;
-  const qty = lastClose > 0 ? Math.floor(notional / lastClose) : 0;
-  if (qty < 1) {
+
+  const rawBuyQty = lastClose > 0 ? notional / lastClose : 0;
+  const qty = allowFrac ? rawBuyQty : Math.floor(rawBuyQty);
+
+  if (allowFrac) {
+    if (qty <= 0 || notional < 1.0) {
+      const failReason = qty <= 0 ? "quantity is 0" : `notional $${notional.toFixed(2)} < $1.00`;
+      return {
+        action: "hold",
+        symbol,
+        qty: 0,
+        reasoning: `${reason} · ${sizeNote} — ${failReason}`,
+        confidence,
+      };
+    }
+  } else if (qty < 1) {
     return {
       action: "hold",
       symbol,

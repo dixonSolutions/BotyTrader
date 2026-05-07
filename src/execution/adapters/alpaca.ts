@@ -56,13 +56,15 @@ export class AlpacaAdapter implements BrokerAdapter {
   }
 
   async submitOrder(req: OrderRequest): Promise<Order> {
+    const isFractional = req.qty % 1 !== 0;
+    const type = isFractional ? "market" : (req.type ?? "market");
     const body = {
       symbol: req.symbol,
       qty: req.qty,
       side: req.side,
-      type: req.type ?? "market",
+      type,
       time_in_force: req.timeInForce ?? "day",
-      ...(req.limitPrice !== undefined ? { limit_price: req.limitPrice } : {}),
+      ...(!isFractional && req.limitPrice !== undefined ? { limit_price: req.limitPrice } : {}),
     };
     const raw = await this.request<AlpacaOrder>(`${this.tradingBase}/orders`, {
       method: "POST",
@@ -163,13 +165,18 @@ export class AlpacaAdapter implements BrokerAdapter {
     );
     return raw
       .filter((a) => a.tradable && a.status === "active" && /^[A-Z]{1,5}$/.test(a.symbol))
-      .map((a) => ({
-        symbol: a.symbol,
-        name: a.name,
-        tradable: a.tradable,
-        marginable: a.marginable,
-        fractionable: a.fractionable,
-      }));
+      .map(mapAsset);
+  }
+
+  async getAsset(symbol: string): Promise<AssetInfo | null> {
+    try {
+      const raw = await this.request<AlpacaAsset>(
+        `${this.tradingBase}/assets/${symbol.toUpperCase()}`,
+      );
+      return mapAsset(raw);
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -394,6 +401,16 @@ interface AlpacaAsset {
   tradable: boolean;
   marginable: boolean;
   fractionable: boolean;
+}
+
+function mapAsset(a: AlpacaAsset): AssetInfo {
+  return {
+    symbol: a.symbol,
+    name: a.name,
+    tradable: a.tradable,
+    marginable: a.marginable,
+    fractionable: a.fractionable,
+  };
 }
 
 function mapNewsItem(n: AlpacaNewsItem): NewsItem {

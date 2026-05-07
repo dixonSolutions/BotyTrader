@@ -21,10 +21,10 @@ score_100     = clamp((hybrid + 1) * 50, 0, 100)
 threshold_100 = clamp((buy_threshold + 1) * 50, 0, 100)
 conviction    = |score_100 − threshold_100| / 100
 notional_usd  = min(positioning_scalar * cash * conviction, equity * max_position_pct / 100)
-shares        = floor(notional_usd / last_close)
+shares        = fractional_shares ? notional_usd / last_close : floor(notional_usd / last_close)
 ```
 
-If `shares < 1`, the engine emits **hold** for that cycle (notional too small for one share at the last close). Use `positioning_scalar` (e.g. `0.5`) to scale all buys down without changing thresholds.
+With fractional trading enabled, Alpaca buys require `asset.fractionable === true`, `shares > 0`, and at least `$1.00` notional. Without fractional trading, if `shares < 1`, the engine emits **hold** for that cycle. Use `positioning_scalar` (e.g. `0.5`) to scale all buys down without changing thresholds.
 
 ### Two-threshold buys (optional)
 

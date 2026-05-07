@@ -141,6 +141,11 @@ export interface BrokerAdapter {
   listAssets?(opts?: { assetClass?: string }): Promise<AssetInfo[]>;
 
   /**
+   * Optional — fetch metadata for a single asset.
+   */
+  getAsset?(symbol: string): Promise<AssetInfo | null>;
+
+  /**
    * Optional — fetch OHLCV bars for multiple symbols in batched API calls.
    * Returns a map of UPPER-CASE symbol → bars array (may omit symbols with no data).
    */

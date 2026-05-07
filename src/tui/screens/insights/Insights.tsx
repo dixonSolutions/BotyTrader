@@ -17,17 +17,13 @@ import { theme } from "../../theme.js";
 import { DebuggingPanel } from "../debugging/DebuggingPanel.js";
 import { AgentActivity } from "./AgentActivity.js";
 import { OptimizerActivity } from "./OptimizerActivity.js";
-import { HoldingsCompactTable } from "./HoldingsCompactTable.js";
-import { InsightsHeadTable } from "./InsightsHeadTable.js";
-import { MarketContext } from "./MarketContext.js";
-import { Performance } from "./Performance.js";
-import { PortfolioSummary } from "./Positions.js";
+import { PortfolioMarketOverview } from "./PortfolioMarketOverview.js";
+import { PortfolioDashboard } from "./PortfolioDashboard.js";
 import { RecentCashActivityTable } from "./RecentCashActivityTable.js";
 import { RecentOrdersTable } from "./RecentOrdersTable.js";
 import { RecentTradingSignals } from "./RecentTradingSignals.js";
 import { SystemLogs } from "./SystemLogs.js";
 import { TradingSignalsTable } from "./TradingSignalsTable.js";
-import { VitalSigns } from "./VitalSigns.js";
 import type { Orchestrator, OrchestratorState } from "../../../orchestrator.js";
 import type { LogService } from "../../../services/logService.js";
 import { cellInsideBounds, getTerminalCellBounds, type TerminalViewport } from "../../pointer/cellHit.js";
@@ -57,6 +53,11 @@ export function Insights({ orchestrator, state, logService, onBack }: Props): Re
   const scrollViewRef = useRef<ScrollViewRef>(null);
   const systemLogsWheelRef = useRef<DOMElement | null>(null);
   const debugLogsWheelRef = useRef<DOMElement | null>(null);
+  const ordersWheelRef = useRef<DOMElement | null>(null);
+  const cashWheelRef = useRef<DOMElement | null>(null);
+  const marketOverviewWheelRef = useRef<DOMElement | null>(null);
+  const signalsWheelRef = useRef<DOMElement | null>(null);
+  const recentSignalsWheelRef = useRef<DOMElement | null>(null);
   const viewportRef = useRef<TerminalViewport>({ cols: 80, rows: 24 });
   viewportRef.current = { cols: stdout.columns ?? 80, rows: stdout.rows ?? 24 };
   const [insightsTab, setInsightsTab] = useState<InsightsTab>("portfolio");
@@ -79,12 +80,25 @@ export function Insights({ orchestrator, state, logService, onBack }: Props): Re
   useEffect(() => {
     const onScroll = (pos: { x: number; y: number }, dir: "scrollup" | "scrolldown" | null) => {
       if (dir === null) return;
-      if (insightsTab === "bot") {
-        const sysBox = getTerminalCellBounds(systemLogsWheelRef);
-        if (sysBox && cellInsideBounds(sysBox, pos.x, pos.y, viewportRef.current)) return;
-        const dbgBox = getTerminalCellBounds(debugLogsWheelRef);
-        if (dbgBox && cellInsideBounds(dbgBox, pos.x, pos.y, viewportRef.current)) return;
+
+      // Gate: if cursor is inside a scrollable box, don't scroll the main page
+      const boxes = [
+        systemLogsWheelRef,
+        debugLogsWheelRef,
+        ordersWheelRef,
+        cashWheelRef,
+        marketOverviewWheelRef,
+        signalsWheelRef,
+        recentSignalsWheelRef,
+      ];
+
+      for (const ref of boxes) {
+        const box = getTerminalCellBounds(ref);
+        if (box && cellInsideBounds(box, pos.x, pos.y, viewportRef.current)) {
+          return;
+        }
       }
+
       const scrollView = scrollViewRef.current;
       if (!scrollView) return;
 
@@ -108,7 +122,6 @@ export function Insights({ orchestrator, state, logService, onBack }: Props): Re
   }
 
   const rows = stdout.rows ?? 28;
-  const holdingsViewport = Math.max(4, Math.min(14, Math.floor(rows * 0.22)));
   const debugLogLines = Math.max(6, Math.min(18, rows - 22));
 
   const logToolbar = (
@@ -172,7 +185,25 @@ export function Insights({ orchestrator, state, logService, onBack }: Props): Re
 
   const portfolioTab = (
     <>
-      <InsightsHeadTable state={state} />
+      <Box flexDirection="column" marginBottom={1}>
+        <Box flexDirection="row" flexWrap="wrap" alignItems="center">
+          <Text color={theme.color.muted}>Filter</Text>
+          <Text> </Text>
+          <Box borderStyle="round" borderColor={theme.color.subtle} paddingX={1} width={32}>
+            <TextInput value={posFilter} onChange={setPosFilter} placeholder="Symbol contains…" />
+          </Box>
+        </Box>
+      </Box>
+
+      <PortfolioDashboard
+        account={state.account}
+        positions={state.positions}
+        orders={state.recentOrders}
+        performance={state.performance}
+        equityHistory={state.equityHistory}
+        config={orchestrator.config}
+        symbolsFilter={posFilter}
+      />
 
       <Box flexDirection="row" flexWrap="wrap" alignItems="center" marginTop={1} marginBottom={0}>
         <Text color={theme.color.muted}>Focus symbol </Text>
@@ -199,40 +230,12 @@ export function Insights({ orchestrator, state, logService, onBack }: Props): Re
         </Text>
       </Box>
 
-      <VitalSigns state={state} />
-
-      <ScreenFrame
-        title="Balances & exposure"
-        subtitle="Cash & equity vs cost in positions (qty × avg entry) and unrealized P&L."
-      >
-        <PortfolioSummary positions={state.positions} account={state.account} heading="" />
-      </ScreenFrame>
-
-      <Box
-        flexDirection="column"
-        borderStyle="round"
-        borderColor={theme.color.muted}
-        marginTop={1}
-        flexShrink={0}
-      >
-        <Box marginLeft={1} marginTop={0}>
-          <Text bold color={theme.color.primary}>
-            Holdings
-          </Text>
-        </Box>
-        <Box flexDirection="column" paddingX={1} flexShrink={0}>
-          <Text color={theme.color.muted}>Filter</Text>
-          <Box borderStyle="round" borderColor={theme.color.subtle} paddingX={1}>
-            <TextInput value={posFilter} onChange={setPosFilter} placeholder="Symbol contains…" />
-          </Box>
-        </Box>
-        <HoldingsCompactTable
-          positions={state.positions}
-          symbolsFilter={posFilter}
-          viewportRows={holdingsViewport}
-          currency={cur}
-        />
-      </Box>
+      <PortfolioMarketOverview
+        broker={orchestrator.broker}
+        positions={state.positions}
+        watchlist={state.watchlist}
+        wheelCaptureRef={marketOverviewWheelRef}
+      />
 
       <Box
         flexDirection="column"
@@ -246,7 +249,7 @@ export function Insights({ orchestrator, state, logService, onBack }: Props): Re
             Recent orders
           </Text>
         </Box>
-        <RecentOrdersTable orders={state.recentOrders} currency={cur} />
+        <RecentOrdersTable orders={state.recentOrders} currency={cur} wheelCaptureRef={ordersWheelRef} />
       </Box>
 
       <Box
@@ -261,16 +264,12 @@ export function Insights({ orchestrator, state, logService, onBack }: Props): Re
             Cash income
           </Text>
         </Box>
-        <RecentCashActivityTable activities={state.recentCashActivities} currency={cur} />
+        <RecentCashActivityTable
+          activities={state.recentCashActivities}
+          currency={cur}
+          wheelCaptureRef={cashWheelRef}
+        />
       </Box>
-
-      <ScreenFrame title="Performance" subtitle="Risk-style stats from closed activity (not live quotes).">
-        <Performance metrics={state.performance} />
-      </ScreenFrame>
-
-      <ScreenFrame title="Market context" subtitle="Price history for the focus symbol (watchlist).">
-        <MarketContext broker={orchestrator.broker} symbol={focusSymbol} />
-      </ScreenFrame>
     </>
   );
 
@@ -280,13 +279,18 @@ export function Insights({ orchestrator, state, logService, onBack }: Props): Re
         title="Strategy signals"
         subtitle="Recent simple-strategy decisions per symbol (SQLite audit trail)."
       >
-        <RecentTradingSignals signals={state.recentTradingSignals} viewportRows={AGENT_ACTIONS_VIEWPORT} />
+        <RecentTradingSignals
+          signals={state.recentTradingSignals}
+          viewportRows={AGENT_ACTIONS_VIEWPORT}
+          wheelCaptureRef={recentSignalsWheelRef}
+        />
         <Box marginTop={1}>
           <TradingSignalsTable
             signals={state.recentTradingSignals}
             dbOpenError={state.trading.dbOpenError}
             databasePath={state.trading.dbPath}
             viewportRows={SIGNALS_VIEWPORT}
+            wheelCaptureRef={signalsWheelRef}
           />
         </Box>
       </ScreenFrame>

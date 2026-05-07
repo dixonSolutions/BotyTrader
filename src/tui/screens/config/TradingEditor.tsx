@@ -28,6 +28,7 @@ type RowId =
   | "trading_mode"
   | "db_path"
   | "positioning_scalar"
+  | "trading_fractional"
   | "simple_enabled"
   | "tech_w"
   | "sent_w"
@@ -87,6 +88,7 @@ export function TradingEditor({
       label: "Buy sizing scalar (× cash × conviction)",
       value: String(config.trading.positioning_scalar ?? 1),
     },
+    { id: "trading_fractional", label: "Fractional shares (Alpaca)", value: "" },
     { id: "simple_enabled", label: "Simple strategy", value: "" },
     { id: "tech_w", label: "Technical weight (0-1)", value: String(config.strategy.simple.technical_weight) },
     { id: "sent_w", label: "Sentiment weight (0-1)", value: String(config.strategy.simple.sentiment_weight) },
@@ -188,7 +190,7 @@ export function TradingEditor({
     const r = rows[i];
     if (!r) return;
     setSelected(i);
-    if (r.id === "trading_enabled" || r.id === "simple_enabled") {
+    if (r.id === "trading_enabled" || r.id === "simple_enabled" || r.id === "trading_fractional") {
       if (r.id === "trading_enabled") {
         setBusy(true);
         try {
@@ -196,6 +198,8 @@ export function TradingEditor({
         } finally {
           setBusy(false);
         }
+      } else if (r.id === "trading_fractional") {
+        orchestrator.setTradingFractionalShares(!config.trading.fractional_shares);
       } else {
         orchestrator.setSimpleStrategyEnabled(!config.strategy.simple.enabled);
       }
@@ -366,9 +370,15 @@ export function TradingEditor({
                 </Text>
               </Box>
               <Box marginLeft={1} flexShrink={0} alignItems="flex-start">
-                {r.id === "trading_enabled" || r.id === "simple_enabled" ? (
+                {r.id === "trading_enabled" || r.id === "simple_enabled" || r.id === "trading_fractional" ? (
                   <CheckboxGlyph
-                    enabled={r.id === "trading_enabled" ? config.trading.enabled : config.strategy.simple.enabled}
+                    enabled={
+                      r.id === "trading_enabled"
+                        ? config.trading.enabled
+                        : r.id === "trading_fractional"
+                          ? config.trading.fractional_shares
+                          : config.strategy.simple.enabled
+                    }
                   />
                 ) : r.id === "trading_mode" ? (
                   <Select

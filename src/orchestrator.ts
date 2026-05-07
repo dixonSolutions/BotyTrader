@@ -662,6 +662,13 @@ export class Orchestrator {
     this.pushTradingState();
   }
 
+  setTradingFractionalShares(enabled: boolean): void {
+    this.config.trading.fractional_shares = enabled;
+    writeConfig(this.config);
+    this.pushTradingState();
+    this.log("info", `Fractional shares ${enabled ? "enabled" : "disabled"}.`);
+  }
+
   setTradingDatabasePath(p: string): void {
     this.config.trading.database_path = p.trim();
     writeConfig(this.config);

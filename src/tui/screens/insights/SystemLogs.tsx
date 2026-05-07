@@ -171,18 +171,17 @@ export function SystemLogs({
         </Box>
       ) : null}
       {items.length === 0 ? (
-        <Box ref={captureRef}>
+        <Box ref={captureRef as any}>
           <Text color={theme.color.muted}>No log entries yet.</Text>
         </Box>
       ) : (
-        <Box ref={captureRef} height={listHeight} flexDirection="column">
+        <Box ref={captureRef as any} height={listHeight} flexDirection="column">
           <VirtualList
             ref={listRef}
             items={items}
             height={listHeight}
             renderItem={renderItem}
             selectedIndex={selectedIndex}
-            showOverflowIndicators
           />
         </Box>
       )}

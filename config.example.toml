@@ -48,10 +48,14 @@ database_path = "~/.config/trading-cli/trades.db"
 #       positioning_scalar * cash * conviction,
 #       equity * max_position_pct / 100
 #     )
-#   shares        = floor(notional_usd / last_close)  (hold if 0 — notional too small for 1 share)
+#   shares        = notional_usd / last_close when fractional_shares is true and asset.fractionable is true
+#                   otherwise floor(notional_usd / last_close)
 #
 # positioning_scalar: global dial on that dollar amount (default 1). Use e.g. 0.5 to invest half as much.
 positioning_scalar = 1.0
+# Whether to allow fractional share orders (supported by Alpaca).
+# When true, fractionable assets may trade any qty > 0 as long as notional is at least $1.00.
+fractional_shares = false
 
 [strategy.simple]
 enabled = true

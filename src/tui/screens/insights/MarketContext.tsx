@@ -75,7 +75,8 @@ export function MarketContext({ broker, symbol }: Props): React.ReactElement {
   const rsiVal = rsi(closes, 14);
   const sig = rsiSignal(rsiVal);
   const sma20 = sma(closes, 20);
-  const atrVal = atr(bars, 14);
+  const ohlcBars = bars.map((b) => ({ ...b, t: new Date(b.t).getTime() }));
+  const atrVal = atr(ohlcBars, 14);
   const w = stdout.columns ?? 80;
 
   return (

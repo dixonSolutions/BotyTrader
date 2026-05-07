@@ -6,7 +6,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Box, Text, useStdout, type DOMElement } from "ink";
 import { useMouse } from "@zenobius/ink-mouse";
-import { ScrollView, type ScrollViewRef } from "ink-scroll-view";
+import { VirtualList, type VirtualListRef } from "ink-virtual-list";
 import type { RefObject } from "react";
 
 import { Button, ButtonGroup } from "../../components/Button.js";
@@ -32,7 +32,6 @@ const TAB_CHANNEL: Record<DebugMode, LogChannel> = {
 };
 
 const LOG_VIEWPORT = 28;
-const WHEEL_STEP = 3;
 
 type RunStatus = "idle" | "running" | "done" | "error";
 
@@ -95,7 +94,7 @@ export function DebuggingPanel({
 }: DebuggingPanelProps): React.ReactElement {
   const { stdout } = useStdout();
   const mouse = useMouse();
-  const scrollRef = useRef<ScrollViewRef>(null);
+  const listRef = useRef<VirtualListRef>(null);
   const defaultWheelRef = useRef<DOMElement | null>(null);
   const wheelRef = logWheelCaptureRef ?? defaultWheelRef;
   const viewportRef = useRef<TerminalViewport>({ cols: 80, rows: 24 });
@@ -104,6 +103,7 @@ export function DebuggingPanel({
   const [mode, setMode] = useState<DebugMode>("trading");
   const [runStatus, setRunStatus] = useState<RunStatus>("idle");
   const [logs, setLogs] = useState<LogLine[]>([]);
+  const [selectedIndex, setSelectedIndex] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const [copyHint, setCopyHint] = useState<string | null>(null);
   const copyHintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -122,6 +122,7 @@ export function DebuggingPanel({
       .sort((a, b) => b.id - a.id)
       .filter((v, i, arr) => i === 0 || arr[i - 1]!.id !== v.id);
     setLogs(merged.slice(0, 300));
+    setSelectedIndex(0);
   }, [mode, logService]);
 
   useEffect(() => {
@@ -140,22 +141,33 @@ export function DebuggingPanel({
     };
   }, [mode, logService]);
 
+  /** Wheel scroll handler for virtual list navigation */
   useEffect(() => {
     const onScroll = (pos: { x: number; y: number }, dir: "scrollup" | "scrolldown" | null) => {
-      if (dir === null) return;
+      if (dir === null || logs.length === 0) return;
       const box = getTerminalCellBounds(wheelRef);
       if (!box || !cellInsideBounds(box, pos.x, pos.y, viewportRef.current)) return;
-      scrollRef.current?.scrollBy(dir === "scrollup" ? -WHEEL_STEP : WHEEL_STEP);
+
+      setSelectedIndex((prev) => {
+        if (dir === "scrollup") return Math.max(0, prev - 1);
+        return Math.min(logs.length - 1, prev + 1);
+      });
     };
     mouse.events.on("scroll", onScroll);
     return () => {
       mouse.events.off("scroll", onScroll);
     };
-  }, [mouse.events, wheelRef]);
+  }, [mouse.events, logs.length, wheelRef]);
+
+  // Keep selected index in bounds
+  useEffect(() => {
+    setSelectedIndex((i) => Math.min(i, Math.max(0, logs.length - 1)));
+  }, [logs.length]);
 
   function clearLogs(): void {
     logService.clear(TAB_CHANNEL[mode]);
     setLogs([]);
+    setSelectedIndex(0);
   }
 
   const handleRun = useCallback(async () => {
@@ -210,6 +222,23 @@ export function DebuggingPanel({
   const defaultLogH = Math.max(8, Math.min(LOG_VIEWPORT, rows - 18));
   const logPanelHeight = logViewportLines ?? defaultLogH;
   const activeTab = TABS.find((t) => t.id === mode)!;
+
+  function renderItem({ item, isSelected }: { item: LogLine; isSelected: boolean }): React.ReactElement {
+    const time = item.ts.slice(11, 23);
+    const selectionPrefix = isSelected ? "> " : "  ";
+    return (
+      <Box flexDirection="row" flexShrink={0}>
+        <Text color={isSelected ? theme.color.primary : theme.color.muted}>{selectionPrefix}{time} </Text>
+        <Text color={levelColor(item.level)} bold>
+          {levelBadge(item.level)}{" "}
+        </Text>
+        <Text color={isSelected ? theme.color.primary : theme.color.muted}>[{item.channel.slice(0, 4)}] </Text>
+        <Text color={isSelected ? theme.color.primary : levelColor(item.level)} wrap="wrap">
+          {item.message}
+        </Text>
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column" marginTop={1}>
@@ -287,32 +316,20 @@ export function DebuggingPanel({
         title={`${activeTab.label} + system (${logs.length} newest-first)`}
         accent={theme.color.primary}
       >
-        <Box ref={wheelRef} height={logPanelHeight} overflow="hidden">
-          <ScrollView ref={scrollRef} height={logPanelHeight}>
-            {logs.length === 0 ? (
-              <Text color={theme.color.muted}>No logs yet. Run the agent or use Actions → Run.</Text>
-            ) : (
-              logs.map((line) => <LogRow key={line.id} line={line} />)
-            )}
-          </ScrollView>
+        <Box ref={wheelRef as any} height={logPanelHeight} flexDirection="column">
+          {logs.length === 0 ? (
+            <Text color={theme.color.muted}>No logs yet. Run the agent or use Actions → Run.</Text>
+          ) : (
+            <VirtualList
+              ref={listRef}
+              items={logs}
+              height={logPanelHeight}
+              renderItem={renderItem}
+              selectedIndex={selectedIndex}
+            />
+          )}
         </Box>
       </Panel>
-    </Box>
-  );
-}
-
-function LogRow({ line }: { line: LogLine }): React.ReactElement {
-  const time = line.ts.slice(11, 23);
-  return (
-    <Box flexDirection="row" flexShrink={0}>
-      <Text color={theme.color.muted}>{time} </Text>
-      <Text color={levelColor(line.level)} bold>
-        {levelBadge(line.level)}{" "}
-      </Text>
-      <Text color={theme.color.muted}>[{line.channel.slice(0, 4)}] </Text>
-      <Text color={levelColor(line.level)} wrap="wrap">
-        {line.message}
-      </Text>
     </Box>
   );
 }

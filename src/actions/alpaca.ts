@@ -39,12 +39,18 @@ export async function submitOrder(
   }
 
   const side = decision.action === "sell" || decision.action === "close" ? "sell" : "buy";
+  const isFractional = decision.qty % 1 !== 0;
+  if (isFractional && decision.limitPrice !== undefined) {
+    return { submitted: false, reason: "fractional Alpaca orders must be market orders" };
+  }
+  const type = isFractional ? "market" : (decision.limitPrice !== undefined ? "limit" : "market");
+
   const order = await broker.submitOrder({
     symbol: decision.symbol,
     side,
     qty: decision.qty,
-    type: decision.limitPrice !== undefined ? "limit" : "market",
-    limitPrice: decision.limitPrice,
+    type,
+    limitPrice: type === "limit" ? decision.limitPrice : undefined,
     timeInForce: "day",
   });
   return { submitted: true, order };

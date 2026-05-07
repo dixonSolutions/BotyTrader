@@ -125,6 +125,8 @@ export const ConfigSchema = z.object({
        * 1.0 = full formula; 0.5 = half the computed dollar amount per buy.
        */
       positioning_scalar: z.number().min(0).max(10).default(1),
+      /** Whether to allow fractional share orders (if supported by broker). */
+      fractional_shares: z.boolean().default(false),
     })
     .default({}),
   /** Simple technical + FinBERT hybrid strategy parameters. */
