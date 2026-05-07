@@ -17,6 +17,11 @@ interface Props {
   maxRows?: number;
 }
 
+function fillNotional(o: Order, currency: string): string {
+  if (o.filledAvgPrice == null || o.filledQty <= 0) return "—";
+  return clip(fmtMoney(o.filledQty * o.filledAvgPrice, currency), 14);
+}
+
 export function RecentOrdersTable({ orders, currency, maxRows = 14 }: Props): React.ReactElement {
   if (orders.length === 0) {
     return (
@@ -34,14 +39,18 @@ export function RecentOrdersTable({ orders, currency, maxRows = 14 }: Props): Re
     Qty: String(o.qty),
     Fill: `${o.filledQty}`,
     Avg: o.filledAvgPrice != null ? clip(fmtMoney(o.filledAvgPrice, currency), 12) : "—",
+    Notional: fillNotional(o, currency),
     Status: clip(o.status, 10),
   }));
 
-  const columns = ["Time", "Sym", "Side", "Qty", "Fill", "Avg", "Status"];
+  const columns = ["Time", "Sym", "Side", "Qty", "Fill", "Avg", "Notional", "Status"];
 
   return (
     <Box flexDirection="column" paddingX={1} paddingBottom={1}>
       <AppTable data={data} columns={columns} padding={1} />
+      <Text color={theme.color.muted}>
+        Notional = filled qty × avg fill (cash out on buys, proceeds on sells when filled).
+      </Text>
       <Text color={theme.color.muted}>
         Showing {slice.length} of {orders.length} cached order{orders.length !== 1 ? "s" : ""} (newest first).
       </Text>

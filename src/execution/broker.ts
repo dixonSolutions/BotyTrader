@@ -39,6 +39,17 @@ export interface Position {
   unrealizedPnl: number;
 }
 
+/** Broker cash events — dividends, interest, fees (account activity APIs). */
+export interface CashActivity {
+  id: string;
+  activityType: string;
+  ts: string;
+  /** Signed cash impact (e.g. dividend credit). */
+  netAmount: number;
+  symbol?: string;
+  description?: string;
+}
+
 export interface AccountSummary {
   equity: number;
   cash: number;
@@ -95,6 +106,12 @@ export interface BrokerAdapter {
   // Account / portfolio
   getAccount(): Promise<AccountSummary>;
   listPositions(): Promise<Position[]>;
+
+  /**
+   * Optional — dividends, interest, and similar cash postings (newest first).
+   * Adapters without this API return undefined; callers treat as empty.
+   */
+  listCashActivities?(opts?: { limit?: number }): Promise<CashActivity[]>;
 
   // Market data
   getPriceHistory(symbol: string, days: number): Promise<PriceBar[]>;

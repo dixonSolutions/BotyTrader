@@ -12,6 +12,9 @@ bin/
 .env.local
 .env.*.local
 
+# Personal local settings (copy from config.example.toml)
+config.toml
+
 # OS / editor
 .DS_Store
 .vscode/

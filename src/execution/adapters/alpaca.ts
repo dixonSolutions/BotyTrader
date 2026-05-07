@@ -10,6 +10,7 @@ import type {
   AccountSummary,
   AssetInfo,
   BrokerAdapter,
+  CashActivity,
   NewsItem,
   NewsSearchOpts,
   Order,
@@ -104,6 +105,23 @@ export class AlpacaAdapter implements BrokerAdapter {
       marketValue: Number(p.market_value),
       unrealizedPnl: Number(p.unrealized_pl),
     }));
+  }
+
+  /**
+   * Dividends, dividend withholdings, and cash interest — mirrors Alpaca’s
+   * account activity feed (newest first).
+   */
+  async listCashActivities(opts?: { limit?: number }): Promise<CashActivity[]> {
+    const pageSize = Math.min(Math.max(1, opts?.limit ?? 40), 100);
+    const params = new URLSearchParams({
+      activity_types: "DIV,DIVNRA,INT",
+      direction: "desc",
+      page_size: String(pageSize),
+    });
+    const raw = await this.request<AlpacaActivity[]>(
+      `${this.tradingBase}/account/activities?${params.toString()}`,
+    );
+    return raw.map(mapCashActivity);
   }
 
   async getPriceHistory(symbol: string, days: number): Promise<PriceBar[]> {
@@ -327,6 +345,17 @@ interface AlpacaPosition {
   unrealized_pl: string;
 }
 
+/** Subset of Alpaca account activity objects we map into {@link CashActivity}. */
+interface AlpacaActivity {
+  id: string;
+  activity_type: string;
+  transaction_time?: string;
+  date?: string;
+  net_amount: string;
+  symbol?: string;
+  description?: string;
+}
+
 interface AlpacaBar {
   t: string;
   o: number;
@@ -420,5 +449,17 @@ function mapOrder(raw: AlpacaOrder): Order {
     status: raw.status,
     submittedAt: raw.submitted_at,
     filledAvgPrice: raw.filled_avg_price !== undefined ? Number(raw.filled_avg_price) : undefined,
+  };
+}
+
+function mapCashActivity(raw: AlpacaActivity): CashActivity {
+  const ts = raw.transaction_time ?? raw.date ?? new Date().toISOString();
+  return {
+    id: raw.id,
+    activityType: raw.activity_type,
+    ts,
+    netAmount: Number(raw.net_amount),
+    symbol: raw.symbol,
+    description: raw.description,
   };
 }

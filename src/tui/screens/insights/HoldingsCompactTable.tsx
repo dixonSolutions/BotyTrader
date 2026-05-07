@@ -29,20 +29,33 @@ interface HoldingsItem {
   symbol: string;
   qty: string;
   avg: string;
+  invested: string;
   value: string;
   upnl: string;
   roi: string;
   level: "success" | "danger" | "text";
 }
 
+const HOLDINGS_COLUMNS: { header: string; key: keyof HoldingsItem }[] = [
+  { header: "Symbol", key: "symbol" },
+  { header: "Qty", key: "qty" },
+  { header: "Avg", key: "avg" },
+  { header: "Invested", key: "invested" },
+  { header: "Mkt value", key: "value" },
+  { header: "UPNL", key: "upnl" },
+  { header: "ROI", key: "roi" },
+];
+
 function positionToItem(p: Position, currency: string, cols: number): HoldingsItem {
   const symM = Math.min(10, Math.max(4, Math.floor(cols * 0.1)));
   const qtyM = 10;
-  const moneyM = Math.min(14, Math.max(8, Math.floor(cols * 0.14)));
+  const moneyM = Math.min(13, Math.max(7, Math.floor(cols * 0.12)));
+  const costBasis = p.qty * p.avgEntryPrice;
   return {
     symbol: clip(p.symbol, symM),
     qty: clip(String(p.qty), qtyM),
     avg: clip(fmtMoney(p.avgEntryPrice, currency), moneyM),
+    invested: clip(fmtMoney(costBasis, currency), moneyM),
     value: clip(fmtMoney(p.marketValue, currency), moneyM),
     upnl: clip((p.unrealizedPnl >= 0 ? "+" : "") + fmtMoney(p.unrealizedPnl, currency), moneyM),
     roi: clip(roiStr(p), 8),
@@ -97,17 +110,15 @@ export function HoldingsCompactTable({
     setSelectedIndex((i) => Math.min(i, Math.max(0, items.length - 1)));
   }, [items.length]);
 
-  const columns = ["Symbol", "Qty", "Avg", "Value", "UPNL", "ROI"];
   const colWidths = useMemo(() => {
-    const widths = columns.map((col) => {
-      const headerLen = col.length;
-      const cellLens = items.map((row) => String(row[col.toLowerCase() as keyof HoldingsItem] ?? "").length);
+    return HOLDINGS_COLUMNS.map((def) => {
+      const headerLen = def.header.length;
+      const cellLens = items.map((row) => String(row[def.key] ?? "").length);
       return Math.max(headerLen, ...cellLens, 4) + 2;
     });
-    return widths;
   }, [items]);
 
-  const totalWidth = colWidths.reduce((a, b) => a + b, 0) + columns.length + 1;
+  const totalWidth = colWidths.reduce((a, b) => a + b, 0) + HOLDINGS_COLUMNS.length + 1;
 
   function padCell(text: string, width: number): string {
     const padding = Math.max(0, width - text.length);
@@ -122,10 +133,10 @@ export function HoldingsCompactTable({
         </Text>
         <Box flexDirection="row">
           <Text bold color={theme.color.muted}>│</Text>
-          {columns.map((col, i) => (
-            <React.Fragment key={col}>
-              <Text bold color={theme.color.primary}>{padCell(col, colWidths[i]!)}</Text>
-              {i < columns.length - 1 ? <Text bold color={theme.color.muted}>│</Text> : null}
+          {HOLDINGS_COLUMNS.map((def, i) => (
+            <React.Fragment key={def.header}>
+              <Text bold color={theme.color.primary}>{padCell(def.header, colWidths[i]!)}</Text>
+              {i < HOLDINGS_COLUMNS.length - 1 ? <Text bold color={theme.color.muted}>│</Text> : null}
             </React.Fragment>
           ))}
           <Text bold color={theme.color.muted}>│</Text>
@@ -146,17 +157,19 @@ export function HoldingsCompactTable({
   }
 
   function renderItem({ item, isSelected }: { item: HoldingsItem; isSelected: boolean }): React.ReactElement {
-    const values = [item.symbol, item.qty, item.avg, item.value, item.upnl, item.roi];
+    const values = HOLDINGS_COLUMNS.map((def) => String(item[def.key]));
     const selectionPrefix = isSelected ? "> " : "  ";
 
     return (
       <Box flexDirection="row">
         <Text bold color={theme.color.muted}>{selectionPrefix}│</Text>
         {values.map((val, i) => {
-          const color = i === 4 || i === 5 ? theme.color[item.level] : theme.color.text;
+          const key = HOLDINGS_COLUMNS[i]!.key;
+          const useTrendColor = key === "upnl" || key === "roi";
+          const color = useTrendColor ? theme.color[item.level] : theme.color.text;
           const isHighlighted = isSelected && i === 0;
           return (
-            <React.Fragment key={i}>
+            <React.Fragment key={key}>
               <Text color={isHighlighted ? theme.color.primary : color}>{padCell(val, colWidths[i]!)}</Text>
               {i < values.length - 1 ? <Text bold color={theme.color.muted}>│</Text> : null}
             </React.Fragment>
@@ -190,7 +203,7 @@ export function HoldingsCompactTable({
       </Box>
       {renderFooter()}
       <Text dimColor color={theme.color.muted}>
-        {items.length} position{items.length !== 1 ? "s" : ""} · wheel to scroll
+        {items.length} position{items.length !== 1 ? "s" : ""} · Invested = cost at avg entry · Mkt value = live · wheel to scroll
       </Text>
     </Box>
   );

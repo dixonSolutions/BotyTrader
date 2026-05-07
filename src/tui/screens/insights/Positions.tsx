@@ -76,11 +76,11 @@ export function PortfolioSummary({
         </Text>
       ) : null}
       <Box marginTop={0}>
-        <Text color={theme.color.muted}>Positions market value</Text>
+        <Text color={theme.color.muted}>Market value (positions)</Text>
         <Text bold>{fmtMoney(totals.marketValue, cur)}</Text>
       </Box>
       <Box marginTop={0}>
-        <Text color={theme.color.muted}>Cost basis (invested)</Text>
+        <Text color={theme.color.muted}>Cost basis (money in)</Text>
         <Text bold>{fmtMoney(totals.costBasis, cur)}</Text>
       </Box>
       <Box marginTop={0}>

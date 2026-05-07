@@ -25,7 +25,14 @@ import {
   SUPPORTED_SENTIMENT_REPO_ID,
   type SentimentInstallProgress,
 } from "./trading/sentiment/finbert.js";
-import type { AccountSummary, BrokerAdapter, NewsItem, Order, Position } from "./execution/broker.js";
+import type {
+  AccountSummary,
+  BrokerAdapter,
+  CashActivity,
+  NewsItem,
+  Order,
+  Position,
+} from "./execution/broker.js";
 import { ExitMonitor, type ExitEvent } from "./execution/exit_monitor.js";
 import {
   computePerformance,
@@ -69,6 +76,8 @@ export interface OrchestratorState {
   autotrade: boolean;
   equityHistory: EquitySample[];
   recentOrders: Order[];
+  /** Dividends, interest, etc. when the broker exposes {@link BrokerAdapter.listCashActivities}. */
+  recentCashActivities: CashActivity[];
   performance: PerformanceMetrics;
   /** Summary written when the app last exited cleanly (see `session_snapshot.ts`). */
   previousSession: PreviousSessionSummary | null;
@@ -88,6 +97,7 @@ export type StateListener = (state: OrchestratorState) => void;
 const LOG_BUFFER_MAX = 500;
 const EQUITY_HISTORY_MAX = 1024;
 const ORDER_HISTORY_MAX = 200;
+const CASH_ACTIVITY_MAX = 50;
 const PING_INTERVAL_MS = 15_000;
 
 export interface OrchestratorOptions {
@@ -144,6 +154,7 @@ export class Orchestrator {
       autotrade: this.config.autotrade.enabled,
       equityHistory: [],
       recentOrders: [],
+      recentCashActivities: [],
       performance: emptyPerformance(),
       previousSession: readSessionSnapshot(paths.root),
       trading: this.tradingEngine.getStatus(),
@@ -1061,10 +1072,15 @@ export class Orchestrator {
 
   private async refreshAccount(): Promise<void> {
     try {
-      const [account, positions, ordersMaybe] = await Promise.all([
+      const cashActivitiesPromise =
+        this.broker.listCashActivities?.({ limit: CASH_ACTIVITY_MAX }) ??
+        Promise.resolve([] as CashActivity[]);
+
+      const [account, positions, ordersMaybe, recentCashActivities] = await Promise.all([
         this.broker.getAccount(),
         this.broker.listPositions(),
         this.broker.listOrders({ limit: ORDER_HISTORY_MAX }).catch((): null => null),
+        cashActivitiesPromise.catch((): CashActivity[] => []),
       ]);
       const recentOrders = ordersMaybe ?? this.state.recentOrders;
       const sample: EquitySample = { ts: new Date().toISOString(), equity: account.equity };
@@ -1075,6 +1091,7 @@ export class Orchestrator {
         positions,
         equityHistory,
         recentOrders,
+        recentCashActivities,
         performance,
         recentTradingSignals: this.tradingEngine.listRecentSignals(60),
       });

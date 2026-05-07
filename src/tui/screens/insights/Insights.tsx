@@ -22,6 +22,7 @@ import { InsightsHeadTable } from "./InsightsHeadTable.js";
 import { MarketContext } from "./MarketContext.js";
 import { Performance } from "./Performance.js";
 import { PortfolioSummary } from "./Positions.js";
+import { RecentCashActivityTable } from "./RecentCashActivityTable.js";
 import { RecentOrdersTable } from "./RecentOrdersTable.js";
 import { RecentTradingSignals } from "./RecentTradingSignals.js";
 import { SystemLogs } from "./SystemLogs.js";
@@ -200,7 +201,10 @@ export function Insights({ orchestrator, state, logService, onBack }: Props): Re
 
       <VitalSigns state={state} />
 
-      <ScreenFrame title="Balances & exposure" subtitle="Cash, equity, invested notional, and open P&L.">
+      <ScreenFrame
+        title="Balances & exposure"
+        subtitle="Cash & equity vs cost in positions (qty × avg entry) and unrealized P&L."
+      >
         <PortfolioSummary positions={state.positions} account={state.account} heading="" />
       </ScreenFrame>
 
@@ -243,6 +247,21 @@ export function Insights({ orchestrator, state, logService, onBack }: Props): Re
           </Text>
         </Box>
         <RecentOrdersTable orders={state.recentOrders} currency={cur} />
+      </Box>
+
+      <Box
+        flexDirection="column"
+        borderStyle="round"
+        borderColor={theme.color.muted}
+        marginTop={1}
+        flexShrink={0}
+      >
+        <Box marginLeft={1} marginTop={0}>
+          <Text bold color={theme.color.primary}>
+            Cash income
+          </Text>
+        </Box>
+        <RecentCashActivityTable activities={state.recentCashActivities} currency={cur} />
       </Box>
 
       <ScreenFrame title="Performance" subtitle="Risk-style stats from closed activity (not live quotes).">
