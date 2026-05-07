@@ -1,6 +1,6 @@
 /**
  * Config container — sub-tabbed editor for everything writable.
- * Tabs: Settings · Trading · Models · Indicators · Optimize · Secrets · Schedule. Global search is pointer-driven.
+ * Tabs: Settings · Trading · Models · Indicators · Optimize · Secrets · Schedule · DB. Global search is pointer-driven.
  */
 
 import React, { useMemo, useState } from "react";
@@ -20,6 +20,7 @@ import { TradingEditor } from "./TradingEditor.js";
 import { FinbertModelsEditor } from "./FinbertModelsEditor.js";
 import { IndicatorsEditor } from "./IndicatorsEditor.js";
 import { OptimizationEditor } from "./OptimizationEditor.js";
+import { DbEditor } from "./DbEditor.js";
 import type { Orchestrator, OrchestratorState } from "../../../orchestrator.js";
 import { buildConfigSearchHits, hitHaystack, matchesConfigFilter, type ConfigTabId } from "./configSearchIndex.js";
 
@@ -33,6 +34,7 @@ const TABS: readonly TabItem<ConfigTab>[] = [
   { id: "optimize", label: "Optimize", icon: icons.bullet },
   { id: "secrets", label: "Secrets", icon: icons.bullet },
   { id: "schedule", label: "Schedule", icon: icons.bullet },
+  { id: "db", label: "DB", icon: icons.bullet },
 ];
 
 interface Props {
@@ -84,7 +86,7 @@ export function Config({ orchestrator, state, onBack }: Props): React.ReactEleme
       <ScrollRegion>
         <ScreenFrame
           title="Config"
-          subtitle="Settings, trading, models (FinBERT), indicators, optimizer, secrets, and schedules — persisted to config.toml / .env."
+          subtitle="Settings, trading, models (FinBERT), indicators, optimizer, secrets, schedules, and DB (SQLite) — config.toml / .env."
         >
         <Box marginBottom={1} flexDirection="row" flexWrap="wrap">
           <Button
@@ -162,6 +164,15 @@ export function Config({ orchestrator, state, onBack }: Props): React.ReactEleme
             onFocusRowConsumed={() => setFocusRowId(null)}
           />
         ) : null}
+        {!globalSearchOpen && tab === "db" ? (
+          <DbEditor
+            orchestrator={orchestrator}
+            state={state}
+            active={editorActive("db")}
+            focusRowId={tab === "db" ? focusRowId : null}
+            onFocusRowConsumed={() => setFocusRowId(null)}
+          />
+        ) : null}
         </ScreenFrame>
       </ScrollRegion>
       <Box flexShrink={0}>
@@ -215,15 +226,19 @@ function GlobalSearchOverlay({
               ? "Settings"
               : h.tab === "trading"
                 ? "Trading"
-                : h.tab === "models"
-                  ? "Models"
-                  : h.tab === "indicators"
-                    ? "Indicators"
-                    : h.tab === "optimize"
-                      ? "Optimize"
-                      : h.tab === "secrets"
-                        ? "Secrets"
-                        : "Schedule";
+                : h.tab === "db"
+                  ? "DB"
+                  : h.tab === "models"
+                    ? "Models"
+                    : h.tab === "indicators"
+                      ? "Indicators"
+                      : h.tab === "optimize"
+                        ? "Optimize"
+                        : h.tab === "secrets"
+                          ? "Secrets"
+                          : h.tab === "schedule"
+                            ? "Schedule"
+                            : "Config";
           return (
             <Box key={`${h.tab}-${h.rowId}`} marginBottom={1} flexDirection="row" flexWrap="wrap">
               <Button

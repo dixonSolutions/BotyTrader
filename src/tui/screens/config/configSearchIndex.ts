@@ -12,7 +12,8 @@ export type ConfigTabId =
   | "indicators"
   | "optimize"
   | "secrets"
-  | "schedule";
+  | "schedule"
+  | "db";
 
 export interface ConfigSearchHit {
   tab: ConfigTabId;
@@ -84,7 +85,6 @@ function tradingHits(config: Orchestrator["config"]): ConfigSearchHit[] {
     },
     { rowId: "trading_enabled", label: "Trading engine", valueHint: String(config.trading.enabled) },
     { rowId: "trading_mode", label: "Paper / live (Alpaca)", valueHint: config.trading.mode },
-    { rowId: "db_path", label: "SQLite database path", valueHint: config.trading.database_path },
     {
       rowId: "positioning_scalar",
       label: "Buy sizing scalar (trading)",
@@ -113,6 +113,23 @@ function tradingHits(config: Orchestrator["config"]): ConfigSearchHit[] {
     title: r.label,
     subtitle: `Current: ${r.valueHint}`,
   }));
+}
+
+function dbHits(config: Orchestrator["config"]): ConfigSearchHit[] {
+  return [
+    {
+      tab: "db",
+      rowId: "sqlite_path",
+      title: "Trading SQLite — paths",
+      subtitle: `Config value: ${config.trading.database_path} · Edit path under Trading tab`,
+    },
+    {
+      tab: "db",
+      rowId: "erase_db",
+      title: "Erase SQLite database",
+      subtitle: "Destructive — removes signals & optimizer snapshots; recreates empty DB",
+    },
+  ];
 }
 
 function secretsHits(): ConfigSearchHit[] {
@@ -285,6 +302,7 @@ export function buildConfigSearchHits(orchestrator: Orchestrator): ConfigSearchH
   return [
     ...settingsHits(orchestrator.config),
     ...tradingHits(orchestrator.config),
+    ...dbHits(orchestrator.config),
     ...modelsHits(orchestrator.config),
     ...indicatorsHits(orchestrator.config),
     ...optimizationHits(orchestrator.config),

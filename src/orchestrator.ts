@@ -12,7 +12,7 @@
  * makes a future remote API straightforward to add.
  */
 
-import { resolvePaths, writeConfig, type Config, type Secrets } from "./config.js";
+import { resolvePaths, resolveTradingDatabasePath, writeConfig, type Config, type Secrets } from "./config.js";
 import type { TradingMode } from "./config.js";
 import { createBrokerAdapter } from "./execution/adapters/index.js";
 import { TradingEngine, type TradingEngineStatus } from "./trading/engine.js";
@@ -668,6 +668,22 @@ export class Orchestrator {
     this.tradingEngine.close();
     this.tradingEngine.refreshReadiness();
     this.pushTradingState();
+  }
+
+  /** Delete trading SQLite (signals, snapshots) and recreate an empty database at the configured path. */
+  eraseTradingDatabase(): { ok: boolean; error?: string } {
+    const out = this.tradingEngine.eraseTradingDatabase();
+    const absPath = resolveTradingDatabasePath(this.config);
+    if (out.ok) {
+      this.log(
+        "warn",
+        `Trading SQLite erased and recreated at ${absPath} — stored signals and optimizer snapshots were removed.`,
+      );
+    } else {
+      this.log("error", `Erase trading database failed: ${out.error ?? "unknown error"}`);
+    }
+    this.pushTradingState();
+    return out;
   }
 
   setSentimentConfig(patch: {

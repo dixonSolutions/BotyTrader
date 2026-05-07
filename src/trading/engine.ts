@@ -2,6 +2,8 @@
  * Deterministic simple-strategy engine: signals, persistence, optional orders.
  */
 
+import fs from "node:fs";
+
 import { submitOrder, type SubmitOrderResult } from "../actions/alpaca.js";
 import type { Decision } from "../actions/types.js";
 import type { Config, Secrets } from "../config.js";
@@ -493,6 +495,38 @@ export class TradingEngine {
     this.repo = null;
   }
 
+  /**
+   * Delete the SQLite file (and WAL sidecars), then open a fresh migrated DB.
+   * Removes signals, optimization snapshots, and other strategy history.
+   */
+  eraseTradingDatabase(): { ok: boolean; error?: string } {
+    const p = resolveTradingDatabasePath(this.config);
+    this.status.dbPath = p;
+    this.close();
+    try {
+      removeSqliteFileFamily(p);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.refreshReadiness();
+      return { ok: false, error: msg };
+    }
+    try {
+      this.db = openTradingDatabase(p);
+      this.repo = new TradingRepositories(this.db);
+      this.status.dbOpenError = null;
+      this.status.lastError = null;
+    } catch (e) {
+      const raw = e instanceof Error ? e.message : String(e);
+      this.db = null;
+      this.repo = null;
+      this.status.dbOpenError = describeSqliteLoadError(raw);
+      this.refreshReadiness();
+      return { ok: false, error: this.status.dbOpenError };
+    }
+    this.refreshReadiness();
+    return { ok: true };
+  }
+
   setBroker(broker: BrokerAdapter): void {
     this.broker = broker;
   }
@@ -508,6 +542,17 @@ export class TradingEngine {
 
   private logOptimizer(level: "info" | "warn" | "error" | "debug", message: string): void {
     this.logService?.push("optimizer", level, message);
+  }
+}
+
+function removeSqliteFileFamily(dbPath: string): void {
+  for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+    try {
+      fs.unlinkSync(path);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") throw e;
+    }
   }
 }
 
