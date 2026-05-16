@@ -12,16 +12,19 @@ import { Box, Text, useStdout } from "ink";
 import { Panel } from "../../components/Layout.js";
 import { theme } from "../../theme.js";
 import type { BrokerAdapter, OrderBookSnapshot, PriceBar } from "../../../execution/broker.js";
+import type { PriceSnapshot } from "../../../execution/pricefeed.js";
 import { atr, rsi, rsiSignal, sma } from "../../../signal/technical.js";
 
 interface Props {
   broker: BrokerAdapter;
   symbol: string | null;
+  /** Live WebSocket price data for this symbol (if connected). */
+  livePrice?: PriceSnapshot | null;
 }
 
 const REFRESH_MS = 10_000;
 
-export function MarketContext({ broker, symbol }: Props): React.ReactElement {
+export function MarketContext({ broker, symbol, livePrice }: Props): React.ReactElement {
   const { stdout } = useStdout();
   const [bars, setBars] = useState<PriceBar[]>([]);
   const [book, setBook] = useState<OrderBookSnapshot | null>(null);
@@ -70,6 +73,8 @@ export function MarketContext({ broker, symbol }: Props): React.ReactElement {
     );
   }
 
+  const hasLiveFeed = livePrice && (livePrice.bidPrice !== null || livePrice.lastTradePrice !== null);
+
   const closes = bars.map((b) => b.c);
   const last = closes[closes.length - 1] ?? null;
   const rsiVal = rsi(closes, 14);
@@ -81,7 +86,18 @@ export function MarketContext({ broker, symbol }: Props): React.ReactElement {
 
   return (
     <Panel title={`Market context · ${symbol}`}>
-      <StatBlock label="Last close" value={last === null ? "—" : last.toFixed(2)} maxWidth={w - 4} />
+      {hasLiveFeed ? (
+        <>
+          <StatBlock
+            label={`Live BID · ${livePrice!.bidPrice?.toFixed(2) ?? "—"} × ${livePrice!.askPrice?.toFixed(2) ?? "—"}`}
+            value={`Last trade: ${livePrice!.lastTradePrice?.toFixed(2) ?? "—"} (${livePrice!.lastTradeSize ? `× ${livePrice!.lastTradeSize}` : "—"})`}
+            valueColor={theme.color.success}
+            maxWidth={w - 4}
+          />
+          <Box marginTop={1} />
+        </>
+      ) : null}
+      <StatBlock label={`Last close ${hasLiveFeed ? "(REST)" : ""}`} value={last === null ? "—" : last.toFixed(2)} maxWidth={w - 4} />
       <StatBlock
         label="RSI(14)"
         value={rsiVal === null ? "—" : `${rsiVal.toFixed(1)} (${sig})`}
