@@ -235,6 +235,7 @@ export function Insights({ orchestrator, state, logService, onBack }: Props): Re
         positions={state.positions}
         watchlist={state.watchlist}
         wheelCaptureRef={marketOverviewWheelRef}
+        livePrices={Object.fromEntries(state.livePrices)}
       />
 
       <Box

@@ -54,6 +54,7 @@ import { DisabledMemoryStore, type WorkingMemoryStore } from "./memory/disabled_
 import { MemoryStore } from "./memory/store.js";
 import { GeminiEmbedder } from "./memory/embedder.js";
 import { HfBucket } from "./memory/hf.js";
+import { AlpacaPriceFeed, type PriceSnapshot, type PriceFeedStatus } from "./execution/pricefeed.js";
 
 export interface LogEntry {
   ts: string;
@@ -90,6 +91,10 @@ export interface OrchestratorState {
   tradingMode: TradingMode;
   /** Latest rows from `signals` table (simple strategy audit). */
   recentTradingSignals: SignalRow[];
+  /** Latest real-time price snapshots from WebSocket feed. */
+  livePrices: Map<string, PriceSnapshot>;
+  /** WebSocket price feed status. */
+  priceFeedStatus: PriceFeedStatus | null;
 }
 
 export type StateListener = (state: OrchestratorState) => void;
@@ -120,6 +125,8 @@ export class Orchestrator {
   readonly logService: LogService | null;
 
   private readonly listeners = new Set<StateListener>();
+  /** Same as state.livePrices but as a plain object so React state diffing works. */
+  private livePricesRecord: Record<string, PriceSnapshot> = {};
   private state: OrchestratorState;
   private pingTimer: NodeJS.Timeout | null = null;
   private portfolioTimer: NodeJS.Timeout | null = null;
@@ -131,6 +138,8 @@ export class Orchestrator {
   private tradingCycleInFlight = false;
   private agentCycleInFlight = false;
   private paused = false;
+  /** Real-time price feed (Alpaca only). */
+  private priceFeed: AlpacaPriceFeed | null = null;
 
   constructor(opts: OrchestratorOptions) {
     this.config = opts.config;
@@ -163,6 +172,8 @@ export class Orchestrator {
       candidateCycleSeconds: this.config.schedule.candidate_cycle_seconds,
       tradingMode: this.config.trading.mode,
       recentTradingSignals: [],
+      livePrices: new Map(),
+      priceFeedStatus: null,
     };
 
     this.exitMonitor.onExit((e) => this.onExitEvent(e));
@@ -178,6 +189,7 @@ export class Orchestrator {
     await this.tradingEngine.warmSentimentModel();
     this.pushTradingState();
     await this.measurePing();
+    this.startPriceFeed();
 
     await this.refreshAccount();
 
@@ -216,6 +228,8 @@ export class Orchestrator {
       clearInterval(this.pingTimer);
       this.pingTimer = null;
     }
+    this.priceFeed?.stop();
+    this.priceFeed = null;
     this.clearTradingTimers();
     this.clearOptimizationTimers();
     this.tradingEngine.close();
@@ -230,6 +244,7 @@ export class Orchestrator {
     this.clearTradingTimers();
     this.clearOptimizationTimers();
     this.exitMonitor.stop();
+    this.priceFeed?.stop();
     this.update({ status: "paused" });
     this.log("info", "Orchestrator paused.");
   }
@@ -240,6 +255,7 @@ export class Orchestrator {
     this.exitMonitor.start();
     this.scheduleTradingCycles();
     this.startOptimizationTimers();
+    this.startPriceFeed();
     this.update({ status: "running" });
     this.log("info", "Orchestrator resumed.");
   }
@@ -298,6 +314,7 @@ export class Orchestrator {
     this.config.watchlist.symbols = unique;
     writeConfig(this.config);
     this.update({ watchlist: unique });
+    this.priceFeed?.updateWatchlist(unique);
     this.log("info", `Watchlist updated: ${unique.join(", ")}`);
   }
 
@@ -1058,6 +1075,54 @@ export class Orchestrator {
   // -------------------------------------------------------------------------
   // Cycle execution
   // -------------------------------------------------------------------------
+
+  // -----------------------------------------------------------------------
+  // Real-time price feed
+  // -----------------------------------------------------------------------
+
+  private startPriceFeed(): void {
+    if (this.priceFeed || this.paused) return;
+
+    const platform = this.config.broker.platform;
+    if (platform !== "alpaca_paper" && platform !== "alpaca_live") {
+      return; // Only Alpaca has a real-time streaming API without extra dependencies
+    }
+
+    const apiKey = this.secrets.ALPACA_API_KEY;
+    const apiSecret = this.secrets.ALPACA_API_SECRET;
+    if (!apiKey || !apiSecret) {
+      this.log("warn", "Price feed: Alpaca credentials missing — skipping.");
+      return;
+    }
+
+    this.priceFeed = new AlpacaPriceFeed({
+      apiKey,
+      apiSecret,
+      feed: "iex",
+      onPrice: (snapshot) => this.onPriceUpdate(snapshot),
+      onStatus: (status) => {
+        this.update({ priceFeedStatus: status });
+      },
+    });
+
+    const symbols = this.state.watchlist.length > 0
+      ? this.state.watchlist
+      : ["SPY", "QQQ"];
+
+    void this.priceFeed.start(symbols).then(() => {
+      this.log("info", `Price feed connected (${this.priceFeed?.getStatus().feed ?? "iex"})`);
+    }).catch((e) => {
+      this.log("warn", `Price feed failed: ${describe(e)}`);
+    });
+  }
+
+  private onPriceUpdate(snapshot: PriceSnapshot): void {
+    // Update the Map in state (immutable copy for React)
+    const next = new Map(this.state.livePrices);
+    next.set(snapshot.symbol, snapshot);
+    this.livePricesRecord[snapshot.symbol] = snapshot;
+    this.update({ livePrices: next });
+  }
 
   private startPingLoop(): void {
     if (this.pingTimer) return;

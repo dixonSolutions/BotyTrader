@@ -13,6 +13,7 @@ import React, { useEffect, useMemo, useRef, useState, type RefObject } from "rea
 
 import { theme } from "../../theme.js";
 import type { BrokerAdapter, PriceBar, Position } from "../../../execution/broker.js";
+import type { PriceSnapshot } from "../../../execution/pricefeed.js";
 import { atr, rsi, rsiSignal, sma } from "../../../signal/technical.js";
 import { fmtMoney } from "./Positions.js";
 import { cellInsideBounds, getTerminalCellBounds, type TerminalViewport } from "../../pointer/cellHit.js";
@@ -22,6 +23,8 @@ interface Props {
   positions: Position[];
   watchlist: string[];
   wheelCaptureRef?: RefObject<DOMElement | null>;
+  /** Real-time WebSocket price snapshots (symbol → snapshot). */
+  livePrices?: Record<string, PriceSnapshot>;
 }
 
 interface SymbolRealTime {
@@ -33,12 +36,18 @@ interface SymbolRealTime {
   atr: number | null;
   upnl: number | null;
   qty: number;
+  /** WebSocket last price (null if no live feed). */
+  livePrice: number | null;
+  /** WebSocket bid price. */
+  liveBid: number | null;
+  /** WebSocket ask price. */
+  liveAsk: number | null;
 }
 
 const REFRESH_MS = 15_000;
 const HISTORY_DAYS = 30;
 
-export function PortfolioMarketOverview({ broker, positions, watchlist, wheelCaptureRef }: Props): React.ReactElement {
+export function PortfolioMarketOverview({ broker, positions, watchlist, wheelCaptureRef, livePrices }: Props): React.ReactElement {
   const { stdout } = useStdout();
   const mouse = useMouse();
   const listRef = useRef<VirtualListRef>(null);
@@ -79,7 +88,10 @@ export function PortfolioMarketOverview({ broker, positions, watchlist, wheelCap
           const bars = bulkBars.get(symbol) ?? [];
           const pos = posMap.get(symbol);
           const closes = bars.map((b) => b.c);
-          const last = closes[closes.length - 1] ?? (pos ? pos.marketValue / pos.qty : null);
+          const restLast = closes[closes.length - 1] ?? (pos ? pos.marketValue / pos.qty : null);
+          const live = livePrices?.[symbol.toUpperCase()];
+          const liveLast = live?.bidPrice ?? live?.lastTradePrice ?? null;
+          const last = liveLast ?? restLast;
           const rsiVal = rsi(closes, 14);
           const sig = rsiSignal(rsiVal);
           const sma20 = sma(closes, 20);
@@ -95,6 +107,9 @@ export function PortfolioMarketOverview({ broker, positions, watchlist, wheelCap
             atr: atrVal,
             upnl: pos ? pos.unrealizedPnl : null,
             qty: pos ? pos.qty : 0,
+            livePrice: liveLast,
+            liveBid: live?.bidPrice ?? null,
+            liveAsk: live?.askPrice ?? null,
           };
         }
 
@@ -161,10 +176,11 @@ export function PortfolioMarketOverview({ broker, positions, watchlist, wheelCap
 
       <Box flexDirection="row" paddingX={1} borderStyle="single" borderTop={false} borderLeft={false} borderRight={false} borderColor={theme.color.subtle}>
         <HeaderCell text="Symbol" width={10} />
+        <HeaderCell text="Bid/Ask" width={18} />
         <HeaderCell text="Price" width={10} />
         <HeaderCell text="RSI(14)" width={15} />
         <HeaderCell text="SMA(20)" width={10} />
-        <HeaderCell text="ATR(14)" width={10} />
+        <HeaderCell text="ATR" width={8} />
         <HeaderCell text="UPNL" width={12} />
         <HeaderCell text="Status" width={10} />
       </Box>
@@ -212,6 +228,10 @@ function RowView({ item }: { item: SymbolRealTime; width: number }): React.React
   const rsiCol = signalColor(item.rsiSig);
   const smaTrend = item.last && item.sma20 ? (item.last > item.sma20 ? "↑" : "↓") : "—";
   const smaCol = smaTrend === "↑" ? theme.color.success : smaTrend === "↓" ? theme.color.danger : theme.color.muted;
+  const hasLive = item.livePrice !== null;
+  const liveText = hasLive
+    ? `${item.liveBid?.toFixed(2) ?? "—"} × ${item.liveAsk?.toFixed(2) ?? "—"}`
+    : "REST";
 
   return (
     <Box flexDirection="row">
@@ -220,8 +240,15 @@ function RowView({ item }: { item: SymbolRealTime; width: number }): React.React
           {item.symbol}
         </Text>
       </Box>
+      <Box width={18}>
+        <Text color={hasLive ? theme.color.success : theme.color.muted}>
+          {liveText}
+        </Text>
+      </Box>
       <Box width={10}>
-        <Text>{item.last?.toFixed(2) ?? "—"}</Text>
+        <Text color={hasLive ? theme.color.text : theme.color.muted}>
+          {item.last?.toFixed(2) ?? "—"}
+        </Text>
       </Box>
       <Box width={15}>
         <Text color={rsiCol}>{item.rsi?.toFixed(1) ?? "—"}</Text>
@@ -231,8 +258,8 @@ function RowView({ item }: { item: SymbolRealTime; width: number }): React.React
         <Text color={smaCol}>{smaTrend}</Text>
         <Text color={theme.color.muted}> {item.sma20?.toFixed(1) ?? "—"}</Text>
       </Box>
-      <Box width={10}>
-        <Text>{item.atr?.toFixed(2) ?? "—"}</Text>
+      <Box width={8}>
+        <Text>{item.atr?.toFixed(1) ?? "—"}</Text>
       </Box>
       <Box width={12}>
         <Text color={item.upnl && item.upnl >= 0 ? theme.color.success : theme.color.danger}>
